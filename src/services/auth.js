@@ -1,4 +1,3 @@
-import axios from "axios";
 import { supabase } from "../plugins/supabaseClient";
 
 export default class AuthService {
@@ -10,10 +9,9 @@ export default class AuthService {
     return supabase.auth.signOut();
   }
 
-  // async getSssion() {
-  //   let e = await supabase.auth.getSession();
-  //   return e ? e.data : null;
-  // }
+  getUserProfile(uid) {
+    return supabase.from("bo_user").select().eq("uid", uid).limit(1).single();
+  }
 
   getSession() {
     return new Promise((resolve, reject) => {
@@ -21,10 +19,13 @@ export default class AuthService {
         .getSession()
         .then((d) => {
           // console.log(d);
-          if (d.data) {
+          if (d.data.session) {
             if (d.data.session.expires_at < Math.floor(Date.now() / 1000)) {
               d.data.isexpired = true;
             }
+            resolve(d.data);
+          } else {
+            d.data.isexpired = true;
             resolve(d.data);
           }
         })

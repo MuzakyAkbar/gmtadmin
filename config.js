@@ -1,1 +1,1 @@
-window.API_URL = "https://srv01.ombak.id/rest/v1/";
+window.API_URL = "https://s03.pirantisolusi.com/rest/v1/";

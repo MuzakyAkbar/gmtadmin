@@ -1,23 +1,28 @@
-<script setup>
+<script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { ref } from 'vue'
+import { useUserStore } from '../../store/user'
 import AuthService from '../../services/auth';
 import { useRouter } from 'vue-router';
+import { Avatar } from 'primevue';
+
+const router = useRouter();
+const userstore = useUserStore();
+const authsvc = new AuthService();
 
 const target = ref(null)
 const dropdownOpen = ref(false)
-
-const router = useRouter();
 
 onClickOutside(target, () => {
   dropdownOpen.value = false
 })
 
-const onLogout = ()=>{
-  const authsvc = new AuthService()
-  authsvc.logout()
-  router.push({name:'Login'})
-}
+const onlogout = (()=>{
+  authsvc.logout().then(()=>{
+    router.push('/');
+  })
+})
+
 </script>
 
 <template>
@@ -28,12 +33,12 @@ const onLogout = ()=>{
       @click.prevent="dropdownOpen = !dropdownOpen"
     >
       <span class="hidden text-right lg:block">
-        <span class="block text-sm font-medium text-black dark:text-white">Thomas Anree</span>
-        <span class="block text-xs font-medium">UX Designer</span>
+        <span class="block text-sm font-medium text-black dark:text-white">{{ userstore.user.full_name }}</span>
+        <span class="block text-xs font-medium">{{ userstore.user.email }}</span>
       </span>
 
       <span class="w-12 h-12 rounded-full">
-        <img src="../../assets/img/avatar.png" alt="User" />
+        <img src="@/assets/img/avatar.png" alt="User" />
       </span>
 
       <svg
@@ -133,7 +138,7 @@ const onLogout = ()=>{
         </li>
       </ul>
       <button
-        @click="onLogout()"
+        @click="onlogout()"
         class="flex items-center gap-3.5 py-4 px-6 text-sm font-medium duration-300 ease-in-out hover:text-primary lg:text-base"
       >
         <svg

@@ -1,6 +1,6 @@
 <template>
-  <Toast/>
-  <ConfirmDialog/>
+  <Toast position="top-center"></Toast>
+  <ConfirmDialog></ConfirmDialog>
   <component :is="layout">
     <router-view></router-view>
   </component>
@@ -9,7 +9,6 @@
 import AuthLayout from './layouts/AuthLayout.vue'
 import DefaultLayout from './layouts/DefaultLayout.vue'
 import EmptyLayout from "./layouts/BlankLayout.vue";
-import { ConfirmDialog } from 'primevue';
 
 export default {
   name: "App",
@@ -20,7 +19,6 @@ export default {
   },
   computed: {
     layout() {
-      // Determine which layout to use based on route metadata
       return this.$route.meta.layout || "DefaultLayout";
     },
   },

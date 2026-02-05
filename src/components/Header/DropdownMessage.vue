@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { onClickOutside } from '@vueuse/core'
 import { ref } from 'vue'
 
@@ -10,10 +10,10 @@ onClickOutside(target, () => {
   dropdownOpen.value = false
 })
 
-import userOne from '../../assets/img/avatar.png'
-import userTwo from '../../assets/img/avatar.png'
-import userThree from '../../assets/img/avatar.png'
-import userFour from '../../assets/img/avatar.png'
+import userOne from '@/assets/img/avatar.png'
+import userTwo from '@/assets/img/avatar.png'
+import userThree from '@/assets/img/avatar.png'
+import userFour from '@/assets/img/avatar.png'
 
 const messagesList = ref([
   {
