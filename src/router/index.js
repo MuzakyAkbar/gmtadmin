@@ -10,6 +10,7 @@ import Event from "../views/event/Event.vue";
 import Schedule from "../views/schedule/Schedule.vue";
 import Slot from "../views/slot/Slot.vue";
 import Price from "../views/price/Price.vue";
+import Referral from "../views/referral/Referral.vue";
 
 const routes = [
   {
@@ -70,6 +71,12 @@ const routes = [
     path: "/price",
     name: "Price",
     component: Price,
+    meta: { layout: "DefaultLayout" },
+  },
+  {
+    path: "/referral",
+    name: "Referral",
+    component: Referral,
     meta: { layout: "DefaultLayout" },
   },
 ];

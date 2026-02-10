@@ -1,5 +1,5 @@
 <script setup>
-import CRUD from '../../components/CRUD/CRUD.vue';
+import CRUDOrder from '../../components/CRUD/CRUDOrder.vue';
 
 const columns = [
     {
@@ -8,9 +8,9 @@ const columns = [
         type: 'date',
         sortable:true,
         required: true,
-        readonly: true,
+        readonly: false,
         showintable: true,
-        isdisplayed: true,
+        isdisplayed: false,
     },
     {
         field: 'skey',
@@ -20,7 +20,7 @@ const columns = [
         required: true,
         readonly: true,
         showintable: true,
-        isdisplayed: true,
+        isdisplayed: false,
     },
     {
         field: 'bo_venue_id',
@@ -32,7 +32,7 @@ const columns = [
         },
         sortable: true,
         required: true,
-        readonly: true,
+        readonly: false,
         showintable: true,
         isdisplayed: true,
     },
@@ -56,7 +56,7 @@ const columns = [
         },
         sortable: true,
         required: true,
-        readonly: true,
+        readonly: false,
         showintable: true,
         isdisplayed: true,
     },
@@ -84,5 +84,5 @@ const columns = [
 
 </script>
 <template>
-    <CRUD entity="Order" objectname="bo_booking" title="Orders" :columns="columns" :canedit="false" :candelete="false" :sortby="{col:'bookingdate',asc:{ascending:false}}"></CRUD>
+    <CRUDOrder entity="Order" objectname="bo_booking" child1name="bo_bookingline" title="Orders" :columns="columns" :candelete="false" :sortby="{col:'bookingdate',asc:{ascending:false}}"></CRUDOrder>
 </template>

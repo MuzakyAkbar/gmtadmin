@@ -6,12 +6,17 @@ import SidebarItem from './SidebarItem.vue'
 import Logo from '../Common/Logo.vue'
 
 const target = ref(null)
+const isCollapsed = ref(false)
 
 const sidebarStore = useSidebarStore()
 
 onClickOutside(target, () => {
   sidebarStore.isSidebarOpen = false
 })
+
+const toggleCollapse = () => {
+  isCollapsed.value = !isCollapsed.value
+}
 
 const menuGroups = ref([
   {
@@ -62,6 +67,11 @@ const menuGroups = ref([
         label: 'Price',
         route: '/price',
       },
+      {
+        icon: 'pi pi-percentage',
+        label: 'Referral',
+        route: '/referral',
+      },
     ]
   }
 ])
@@ -69,17 +79,24 @@ const menuGroups = ref([
 
 <template>
   <aside
-    class="absolute left-0 top-0 z-9999 flex h-screen w-72.5 flex-col overflow-y-hidden bg-gmt1 duration-300 ease-linear dark:bg-boxdark lg:static lg:translate-x-0"
+    class="absolute left-0 top-0 z-9999 flex h-screen flex-col overflow-y-hidden bg-gmt1 duration-300 ease-linear dark:bg-boxdark lg:static lg:translate-x-0 transition-all"
     :class="{
       'translate-x-0': sidebarStore.isSidebarOpen,
-      '-translate-x-full': !sidebarStore.isSidebarOpen
+      '-translate-x-full': !sidebarStore.isSidebarOpen,
+      'w-72.5': !isCollapsed,
+      'w-20': isCollapsed
     }"
     ref="target"
   >
     <!-- SIDEBAR HEADER -->
-    <div class="flex items-center justify-between gap-2 px-6 py-5.5 lg:py-6.5">
-      <router-link to="/">
+    <div class="flex items-center justify-between gap-2 px-6 py-5.5 lg:py-6.5"
+         :class="{ 'px-3': isCollapsed }">
+      <router-link to="/" v-if="!isCollapsed" class="flex items-center">
         <Logo class="w-100" light="true" />
+      </router-link>
+      
+      <router-link to="/" v-else class="flex items-center justify-center w-full">
+        <Logo class="w-10 h-10" light="true" style="max-width: 40px; max-height: 40px;" />
       </router-link>
 
       <button class="block lg:hidden" @click="sidebarStore.isSidebarOpen = false">
@@ -100,12 +117,35 @@ const menuGroups = ref([
     </div>
     <!-- SIDEBAR HEADER -->
 
+    <!-- Toggle Collapse Button (Desktop only) -->
+    <button 
+      @click="toggleCollapse"
+      class="hidden lg:flex absolute -right-3.5 top-24 bg-white dark:bg-boxdark text-gmt1 dark:text-white rounded-full p-2 shadow-lg hover:shadow-xl border-2 border-gmt1 dark:border-white transition-all z-50 items-center justify-center"
+      :title="isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'"
+    >
+      <svg 
+        class="w-4 h-4 transition-transform duration-300"
+        :class="{ 'rotate-180': isCollapsed }"
+        fill="none" 
+        stroke="currentColor" 
+        viewBox="0 0 24 24"
+        stroke-width="2.5"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+      </svg>
+    </button>
+
     <div class="flex flex-col overflow-y-auto duration-300 ease-linear no-scrollbar">
       <!-- Sidebar Menu -->
-      <nav class="px-4 py-4 mt-5 lg:mt-9 lg:px-6">
+      <nav class="px-4 py-4 mt-5 lg:mt-9 lg:px-6" :class="{ 'px-2': isCollapsed }">
         <template v-for="menuGroup in menuGroups" :key="menuGroup.name">
           <div>
-            <h3 class="mb-4 ml-4 text-sm font-medium text-bodydark2">{{ menuGroup.name }}</h3>
+            <h3 
+              v-if="!isCollapsed"
+              class="mb-4 ml-4 text-sm font-medium text-bodydark2"
+            >
+              {{ menuGroup.name }}
+            </h3>
 
             <ul class="mb-6 flex flex-col gap-1.5">
               <SidebarItem
@@ -113,6 +153,7 @@ const menuGroups = ref([
                 :item="menuItem"
                 :key="index"
                 :index="index"
+                :is-collapsed="isCollapsed"
               />
             </ul>
           </div>
@@ -123,3 +164,15 @@ const menuGroups = ref([
     </div>
   </aside>
 </template>
+
+<style scoped>
+/* Smooth transition for width changes */
+aside {
+  transition: width 0.3s ease-in-out;
+}
+
+/* Ensure toggle button is always visible and clickable */
+button[title*="Sidebar"] {
+  z-index: 9999;
+}
+</style>

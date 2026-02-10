@@ -5,7 +5,7 @@ import SidebarDropdown from './SidebarDropdown.vue'
 
 const sidebarStore = useSidebarStore()
 
-const props = defineProps(['item', 'index'])
+const props = defineProps(['item', 'index', 'isCollapsed'])
 const currentPage = useRoute().name
 
 interface SidebarItem {
@@ -27,17 +27,20 @@ const handleItemClick = () => {
     <router-link
       :to="item.route"
       class="group relative flex items-center gap-2.5 rounded-sm py-2 px-4 font-medium text-bodydark1 duration-300 ease-in-out hover:bg-white hover:text-black dark:hover:bg-meta-4"
-      @click.prevent="handleItemClick"
       :class="{
-        'bg-white text-gray-900 dark:bg-meta-4': sidebarStore.page === item.label
+        'bg-white text-gray-900 dark:bg-meta-4': sidebarStore.page === item.label,
+        'justify-center': isCollapsed,
+        'px-2': isCollapsed
       }"
+      @click.prevent="handleItemClick"
+      :title="isCollapsed ? item.label : ''"
     >
-      <span :class="item.icon"></span>
+      <span :class="item.icon" :style="{ fontSize: isCollapsed ? '1.25rem' : '' }"></span>
 
-      {{ item.label }}
+      <span v-if="!isCollapsed">{{ item.label }}</span>
 
       <svg
-        v-if="item.children"
+        v-if="item.children && !isCollapsed"
         class="absolute -translate-y-1/2 fill-current right-4 top-1/2"
         :class="{ 'rotate-180': sidebarStore.page === item.label }"
         width="20"
@@ -56,7 +59,7 @@ const handleItemClick = () => {
     </router-link>
 
     <!-- Dropdown Menu Start -->
-    <div class="overflow-hidden transform translate" v-show="sidebarStore.page === item.label">
+    <div class="overflow-hidden transform translate" v-show="sidebarStore.page === item.label && !isCollapsed">
       <SidebarDropdown
         v-if="item.children"
         :items="item.children"
