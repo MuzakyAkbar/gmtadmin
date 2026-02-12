@@ -173,6 +173,9 @@ onMounted(()=>{
                     <template v-if="col.type=='datetime'" #body="slotProps">
                         {{ new Date(slotProps.data[col.field]).toLocaleString('id-ID') }}
                     </template>
+                    <template v-if="col.type=='time'" #body="slotProps">
+                        {{ slotProps.data[col.field] ? slotProps.data[col.field].substring(0, 5) : '' }}
+                    </template>
                     <template v-if="col.type=='currency'" #body="slotProps">
                         <div class="text-right">{{ formatCurrency(slotProps.data[col.field]) }}</div>
                     </template>
@@ -203,6 +206,10 @@ onMounted(()=>{
                         <template v-if="col.type=='date'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
                             <DatePicker :id="col.name" v-model="form[col.field]" :disabled="col.readonly" dateFormat="dd/mm/yy"/>
+                        </template>
+                        <template v-if="col.type=='time'">
+                            <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
+                            <InputText :id="col.name" v-model="form[col.field]" type="time" :disabled="col.readonly" step="900"/>
                         </template>
                         <template v-if="col.type=='currency'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>

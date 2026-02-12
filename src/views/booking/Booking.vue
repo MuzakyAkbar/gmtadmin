@@ -73,12 +73,23 @@ const columns = [
     {
         field: 'status',
         name: 'Status',
-        type: 'string',
+        type: 'options',
+        source: {
+            model: null,
+            labelfield: 'label',
+            staticOptions: [
+                { id: 'CO', label: 'Confirmed (CO)' },
+                { id: 'MT', label: 'Maintenance (MT)' },
+                { id: 'CL', label: 'Cancelled (CL)' },
+                { id: 'WP', label: 'Waiting Payment (WP)' },
+            ],
+            visibleOptions: ['CO', 'MT'],
+        },
         sortable: true,
-        required: false,
-        readonly: true,
+        required: true,
+        readonly: false,
         showintable: true,
-        isdisplayed: false,
+        isdisplayed: true, // CHANGED: dari false ke true
     },
     {
         field: 'created',

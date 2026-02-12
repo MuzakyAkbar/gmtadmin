@@ -23,7 +23,7 @@ const columns = [
     {
         field: 'start_time',
         name: 'Start',
-        type: 'string',
+        type: 'time',
         sortable: true,
         required: false,
         showintable: true,
@@ -32,7 +32,7 @@ const columns = [
     {
         field: 'end_time',
         name: 'End',
-        type: 'string',
+        type: 'time',
         sortable: true,
         required: false,
         showintable: true,
