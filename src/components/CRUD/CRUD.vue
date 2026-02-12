@@ -216,6 +216,10 @@ onMounted(()=>{
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
                             <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly"></Dropdown>
                         </template>
+                        <template v-if="col.type=='select'">
+                            <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
+                            <Dropdown :id="col.name" v-model="form[col.field]" :options="col.options" optionLabel="label" optionValue="value" :disabled="col.readonly"></Dropdown>
+                        </template>
                         </div>
                 </template>
                 </div>

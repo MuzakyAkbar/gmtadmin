@@ -6,18 +6,18 @@ const columns = [
         field: 'bookingdate',
         name: 'Booking Date',
         type: 'date',
-        sortable:true,
+        sortable: true,
         required: true,
         readonly: false,
         showintable: true,
-        isdisplayed: false,
+        isdisplayed: true,
     },
     {
         field: 'skey',
         name: 'Booking ID',
         type: 'string',
         sortable: true,
-        required: true,
+        required: false,
         readonly: true,
         showintable: true,
         isdisplayed: false,
@@ -27,8 +27,22 @@ const columns = [
         name: 'Venue',
         type: 'options',
         source: {
-            model:'bo_venue',
-            labelfield:'name',
+            model: 'bo_venue',
+            labelfield: 'name',
+        },
+        sortable: true,
+        required: true,
+        readonly: false,
+        showintable: true,
+        isdisplayed: true,
+    },
+    {
+        field: 'bo_user_id',
+        name: 'Customer',
+        type: 'options',
+        source: {
+            model: 'bo_user',
+            labelfield: 'name',
         },
         sortable: true,
         required: true,
@@ -38,51 +52,60 @@ const columns = [
     },
     {
         field: 'grandtotal',
-        name: 'Total',
+        name: 'Grand Total',
         type: 'currency',
         sortable: true,
-        required: true,
+        required: false,
         readonly: true,
         showintable: true,
         isdisplayed: true,
     },
     {
-        field: 'bo_user_id',
-        name: 'User',
-        type: 'options',
-        source: {
-            model:'bo_user',
-            labelfield:'name',
-        },
+        field: 'discount_amount',
+        name: 'Discount',
+        type: 'currency',
         sortable: true,
-        required: true,
-        readonly: false,
-        showintable: true,
-        isdisplayed: true,
+        required: false,
+        readonly: true,
+        showintable: false,
+        isdisplayed: false,
     },
     {
         field: 'status',
         name: 'Status',
         type: 'string',
         sortable: true,
-        required: true,
+        required: false,
         readonly: true,
         showintable: true,
-        isdisplayed: true,
+        isdisplayed: false,
     },
     {
         field: 'created',
-        name: 'Created',
+        name: 'Created At',
         type: 'date',
-        sortable:true,
-        required: true,
+        sortable: true,
+        required: false,
         showintable: true,
-        isdisplayed: true,
+        isdisplayed: false,
         readonly: true,
     },
 ]
 
 </script>
 <template>
-    <CRUDOrder entity="Order" objectname="bo_booking" child1name="bo_bookingline" title="Orders" :columns="columns" :candelete="false" :sortby="{col:'bookingdate',asc:{ascending:false}}"></CRUDOrder>
+    <CRUDOrder 
+        entity="Booking" 
+        objectname="bo_booking" 
+        child1name="bo_bookingline" 
+        title="Bookings" 
+        :columns="columns" 
+        :candelete="false" 
+        :sortby="{col:'created', ascending:false}"
+    >
+    </CRUDOrder>
 </template>
+
+<style scoped>
+/* Add any custom styles if needed */
+</style>

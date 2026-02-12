@@ -1,11 +1,11 @@
 <script setup>
-import { onMounted, ref } from 'vue';
+import { onMounted, ref, watch, computed } from 'vue';
 import { DatePicker, useToast, Dialog } from 'primevue';
 import { useConfirm } from 'primevue';
 import {useI18n} from 'vue-i18n';
 import {formatCurrency} from '../../composables/formater'
 import RestService from '../../services/rest';
-import { create } from 'ol/transform';
+import AdminBookingService from '../../services/AdminBookingService';
 
 const props = defineProps(['entity','objectname','child1name','title','columns','searchfield','details','sortby','candelete','canedit'])
 const i18n = useI18n()
@@ -16,6 +16,7 @@ const svc = new RestService(props.objectname);
 const svcline = new RestService(props.child1name);
 const svcslot = new RestService('bo_slot');
 const svcpayment = new RestService('bo_payment');
+const adminBookingService = new AdminBookingService();
 
 const listview = ref(true)
 const isloading = ref(true)
@@ -26,16 +27,39 @@ const tabledata = ref()
 const form = ref({})
 const references = ref([])
 const refvalue = ref([])
-const dataline = ref()
-const dataslot = ref()
+const dataline = ref([])
+const dataslot = ref({})
 const svcprice = new RestService('bo_price');
 const availableSlots = ref([])
 const lineForm = ref({})
 const showLineDialog = ref(false)
 const isLineLoading = ref(false)
 const tempDataline = ref([])
+const tempJoggingLines = ref([])
 const isAllDaySelected = ref(false)
 const originalAllDayPrice = ref(0)
+
+// Computed untuk total harga
+const calculatedGrandTotal = computed(() => {
+    let total = 0;
+    
+    // Sum dari tempDataline
+    if (tempDataline.value && tempDataline.value.length > 0) {
+        total += tempDataline.value.reduce((sum, line) => sum + (line.price || 0), 0);
+    }
+    
+    // Sum dari tempJoggingLines
+    if (tempJoggingLines.value && tempJoggingLines.value.length > 0) {
+        total += tempJoggingLines.value.reduce((sum, line) => sum + (line.price || 0), 0);
+    }
+    
+    return total;
+});
+
+// Auto update grandtotal ketika lines berubah
+watch([tempDataline, tempJoggingLines], () => {
+    form.value.grandtotal = calculatedGrandTotal.value;
+}, { deep: true });
 
 
 const onAdd = async ()=>{
@@ -45,13 +69,17 @@ const onAdd = async ()=>{
         status:'CO',
         created: new Date().toISOString(),
         bookingdate: new Date().toISOString(),
+        grandtotal: 0,
+        original_total: 0,
+        discount_amount: 0
     }
     
     isupdating.value = false
     listview.value = false
     dataline.value = []
-    dataslot.value = []
+    dataslot.value = {}
     tempDataline.value = [] 
+    tempJoggingLines.value = []
     
     isloading.value = false
 }
@@ -81,8 +109,8 @@ const createPayment = async (bookingId, userId, totalAmount) => {
             bo_user_id: userId,
             total: totalAmount,
             totalbayar: totalAmount,
-            payment_method: 'admin',
-            payment_channel: 'admin',
+            payment_method: 'admin_manual',
+            payment_channel: 'admin_panel',
             status: 'CO',
             currency: 'IDR',
             created: new Date().toISOString(),
@@ -115,7 +143,7 @@ const onSave = async ()=>{
         return
     }
     
-    if(tempDataline.value.length === 0 && !isupdating.value) {
+    if(tempDataline.value.length === 0 && tempJoggingLines.value.length === 0 && !isupdating.value) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please add at least one booking line', life: 3000})
         return
     }
@@ -125,7 +153,15 @@ const onSave = async ()=>{
     try {
         if(isupdating.value){
             // Update booking header
-            const updateResult = await svc.update(form.value.id, form.value)
+            const updateResult = await svc.update(form.value.id, {
+                bo_venue_id: form.value.bo_venue_id,
+                bo_user_id: form.value.bo_user_id,
+                bookingdate: form.value.bookingdate,
+                grandtotal: form.value.grandtotal,
+                original_total: form.value.original_total,
+                discount_amount: form.value.discount_amount,
+                status: form.value.status
+            })
             
             if(updateResult.error){
                 toast.add({severity:'error',summary:'Error',detail:updateResult.error.message, life: 3000})
@@ -133,19 +169,35 @@ const onSave = async ()=>{
                 return
             }
             
-            // Jika ada new lines di temp, save ke DB
+            // Jika ada new regular lines di temp, save ke DB
             if(tempDataline.value.length > 0) {
-                let lineData = []
-                for(const line of tempDataline.value) {
-                    lineData.push ({
-                        bo_booking_id: form.value.id,
-                        bo_slot_id: line.bo_slot_id,
-                        tanggal: line.tanggal,
-                        price: line.price
-                    })
-                    
-                }
+                let lineData = tempDataline.value.map(line => ({
+                    bo_booking_id: form.value.id,
+                    bo_venue_id: form.value.bo_venue_id,
+                    bo_slot_id: line.bo_slot_id,
+                    tanggal: line.tanggal,
+                    price: line.price,
+                    isactive: true
+                }));
+                
                 await svcline.add(lineData)
+            }
+            
+            // Jika ada new jogging lines di temp, save ke DB
+            if(tempJoggingLines.value.length > 0) {
+                const svcJogging = new RestService('bo_bookingline_jogging');
+                let joggingData = tempJoggingLines.value.map(line => ({
+                    bo_booking_id: form.value.id,
+                    bo_venue_id: form.value.bo_venue_id,
+                    bo_slot_id: line.bo_slot_id,
+                    tanggal: line.tanggal,
+                    jumlah_orang: line.jumlah_orang,
+                    harga_per_orang: line.harga_per_orang,
+                    price: line.price,
+                    isactive: true
+                }));
+                
+                await svcJogging.add(joggingData)
             }
             
             // Create or update payment
@@ -159,41 +211,37 @@ const onSave = async ()=>{
             
         } else {
             // Insert booking header
-            console.log('Saving booking:', form.value)
-            const bookingResult = await svc.add(form.value)
+            const bookingData = {
+                bo_venue_id: form.value.bo_venue_id,
+                bo_user_id: form.value.bo_user_id,
+                bookingdate: form.value.bookingdate,
+                grandtotal: form.value.grandtotal,
+                original_total: form.value.original_total || form.value.grandtotal,
+                discount_amount: form.value.discount_amount || 0,
+                bo_referral_id: form.value.bo_referral_id || null,
+                lines: tempDataline.value.map(line => ({
+                    bo_slot_id: line.bo_slot_id,
+                    tanggal: line.tanggal,
+                    price: line.price
+                })),
+                joggingLines: tempJoggingLines.value.map(line => ({
+                    bo_slot_id: line.bo_slot_id,
+                    tanggal: line.tanggal,
+                    jumlah_orang: line.jumlah_orang,
+                    harga_per_orang: line.harga_per_orang,
+                    price: line.price
+                }))
+            };
             
-            if(bookingResult.error){
-                toast.add({severity:'error',summary:'Error',detail:bookingResult.error.message, life: 3000})
+            const result = await adminBookingService.createAdminBooking(bookingData);
+            
+            if(result.error){
+                toast.add({severity:'error',summary:'Error',detail:result.error.message, life: 3000})
                 isloading.value = false
                 return
             }
             
-            // Get booking ID yang baru dibuat
-            const newBookingId = bookingResult.data[0].id
-            
-            // Insert semua booking lines
-            if(tempDataline.value.length > 0) {
-                let lineData = []
-                for(const line of tempDataline.value) {
-                    lineData.push ({
-                        bo_booking_id: newBookingId,
-                        bo_slot_id: line.bo_slot_id,
-                        tanggal: line.tanggal,
-                        price: line.price
-                    })
-                    
-                }
-                await svcline.add(lineData)
-            }
-            
-            // Create payment
-            try {
-                await createPayment(newBookingId, form.value.bo_user_id, form.value.grandtotal || 0)
-                toast.add({severity:'success',summary:'Success',detail:'Booking and payment created successfully', life: 3000})
-            } catch(paymentErr) {
-                console.error('Payment error:', paymentErr)
-                toast.add({severity:'warn',summary:'Warning',detail:'Booking created but payment creation failed', life: 3000})
-            }
+            toast.add({severity:'success',summary:'Success',detail:'Booking created successfully', life: 3000})
         }
         
         // Reset dan refresh
@@ -202,6 +250,7 @@ const onSave = async ()=>{
         isupdating.value = false
         form.value = {}
         tempDataline.value = []
+        tempJoggingLines.value = []
         
     } catch(err) {
         console.error('Error saving booking:', err)
@@ -246,6 +295,7 @@ const onEdit = item => {
     isupdating.value = true
     listview.value = false
     tempDataline.value = []
+    tempJoggingLines.value = []
 
     fetchBookingLines(item.id)
 }
@@ -258,16 +308,29 @@ const fetchBookingLines = async (bookingId) => {
                 field: 'bo_booking_id',
                 op: 'eq',
                 value: bookingId
+            },
+            {
+                field: 'isactive',
+                op: 'eq',
+                value: true
             }
         ]
         
         try {
             const result = await svcline.listwhere(0, 250, whereclause)
-            dataline.value = result.data
+            dataline.value = result.data || []
+            
+            // Fetch jogging lines juga
+            const svcJogging = new RestService('bo_bookingline_jogging');
+            const joggingResult = await svcJogging.listwhere(0, 250, whereclause)
+            const joggingLines = joggingResult.data || []
+            
+            // Gabungkan dataline dengan jogging lines untuk ditampilkan
+            const allLines = [...dataline.value, ...joggingLines]
             
             // Fetch slots untuk setiap booking line
-            if(result.data && result.data.length > 0){
-                await fetchSlots(result.data)
+            if(allLines.length > 0){
+                await fetchSlots(allLines)
             }
             
             isloading.value = false
@@ -305,7 +368,7 @@ const fetchSlots = async (bookingLines) => {
     }
 }
 
-const fetchAvailableSlots = async (venueId) => {
+const fetchAvailableSlots = async (venueId, selectedDate = null) => {
     if(!venueId) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please select venue first', life: 3000})
         return []
@@ -340,6 +403,11 @@ const fetchAvailableSlots = async (venueId) => {
                     field: 'id',
                     op: 'in',
                     value: slotIds
+                },
+                {
+                    field: 'isactive',
+                    op: 'eq',
+                    value: true
                 }
             ]
             
@@ -347,29 +415,57 @@ const fetchAvailableSlots = async (venueId) => {
             
             if(slotResult.data) {
                 // Combine slot with price info
-                const slotsWithPrice = slotResult.data.map(slot => {
-                    const price = priceResult.data.find(p => p.bo_slot_id === slot.id)
+                const slotsWithPrice = await Promise.all(slotResult.data.map(async slot => {
+                    // Get applicable price for this slot
+                    let price = 0;
+                    let pricePerPerson = 0;
+                    let capacity = 0;
+                    let isPerPerson = false;
+                    
+                    if (selectedDate) {
+                        const priceInfo = await adminBookingService.getSlotPrice(venueId, slot.id, selectedDate);
+                        price = priceInfo.price;
+                        pricePerPerson = priceInfo.pricePerPerson;
+                        capacity = priceInfo.capacity;
+                        isPerPerson = pricePerPerson > 0;
+                    } else {
+                        // Jika belum pilih tanggal, ambil harga default
+                        const priceData = priceResult.data.find(p => p.bo_slot_id === slot.id && !p.is_primetime);
+                        price = priceData?.amount || 0;
+                        pricePerPerson = priceData?.price_per_person || 0;
+                        capacity = priceData?.kapasitas || 0;
+                        isPerPerson = pricePerPerson > 0;
+                    }
+                    
                     return {
                         ...slot,
-                        price: price?.amount || 0,
-                        bo_price_id: price?.id
+                        price,
+                        pricePerPerson,
+                        capacity,
+                        isPerPerson
                     }
-                })
+                }));
                 
-                // Tambahkan opsi "All Day" di awal array
-                const totalPrice = slotsWithPrice.reduce((sum, slot) => sum + slot.price, 0)
+                // Tambahkan opsi "All Day" di awal array (hanya untuk non per-person slots)
+                const regularSlots = slotsWithPrice.filter(s => !s.isPerPerson);
+                const totalPrice = regularSlots.reduce((sum, slot) => sum + slot.price, 0);
+                
                 const allDayOption = {
                     id: 'all_day',
-                    name: 'All Day',
+                    name: 'All Day (Negotiable)',
                     start_time: '00:00',
                     end_time: '23:59',
                     description: 'Book all available slots for the day',
                     price: totalPrice,
-                    isAllDay: true
+                    isAllDay: true,
+                    isPerPerson: false
                 }
                 
-                availableSlots.value = [allDayOption, ...slotsWithPrice]
-                return [allDayOption, ...slotsWithPrice]
+                availableSlots.value = regularSlots.length > 0 
+                    ? [allDayOption, ...slotsWithPrice]
+                    : slotsWithPrice;
+                    
+                return availableSlots.value;
             }
         }
         
@@ -402,6 +498,8 @@ const addLine = async () => {
         bo_slot_id: null,
         tanggal: new Date(),
         price: 0,
+        jumlah_orang: 1,
+        harga_per_orang: 0
     }
     
     isAllDaySelected.value = false
@@ -410,11 +508,34 @@ const addLine = async () => {
     showLineDialog.value = true
 }
 
-const onSlotChange = (slotId) => {
+const onSlotChange = async (slotId) => {
     const selectedSlot = availableSlots.value.find(s => s.id === slotId)
     if(selectedSlot) {
-        lineForm.value.price = selectedSlot.price
-        lineForm.value.bo_slot_id = slotId
+        // Update price saat tanggal berubah
+        if (lineForm.value.tanggal && form.value.bo_venue_id) {
+            const priceInfo = await adminBookingService.getSlotPrice(
+                form.value.bo_venue_id, 
+                slotId, 
+                lineForm.value.tanggal
+            );
+            
+            if (selectedSlot.isPerPerson) {
+                lineForm.value.harga_per_orang = priceInfo.pricePerPerson;
+                lineForm.value.price = priceInfo.pricePerPerson * (lineForm.value.jumlah_orang || 1);
+                lineForm.value.capacity = priceInfo.capacity;
+            } else {
+                lineForm.value.price = priceInfo.price;
+            }
+        } else {
+            lineForm.value.price = selectedSlot.price;
+            if (selectedSlot.isPerPerson) {
+                lineForm.value.harga_per_orang = selectedSlot.pricePerPerson;
+                lineForm.value.capacity = selectedSlot.capacity;
+            }
+        }
+        
+        lineForm.value.bo_slot_id = slotId;
+        lineForm.value.isPerPerson = selectedSlot.isPerPerson;
         
         // Set flag jika All Day dipilih
         if(selectedSlot.isAllDay) {
@@ -426,6 +547,21 @@ const onSlotChange = (slotId) => {
         }
     }
 }
+
+// Watch untuk update harga saat tanggal berubah
+watch(() => lineForm.value.tanggal, async (newDate) => {
+    if (newDate && lineForm.value.bo_slot_id && form.value.bo_venue_id) {
+        await fetchAvailableSlots(form.value.bo_venue_id, newDate);
+        await onSlotChange(lineForm.value.bo_slot_id);
+    }
+});
+
+// Watch untuk update harga saat jumlah orang berubah
+watch(() => lineForm.value.jumlah_orang, (newValue) => {
+    if (lineForm.value.isPerPerson && lineForm.value.harga_per_orang) {
+        lineForm.value.price = lineForm.value.harga_per_orang * (newValue || 1);
+    }
+});
 
 const saveLine = async () => {
     if(!lineForm.value.bo_slot_id) {
@@ -445,10 +581,33 @@ const saveLine = async () => {
         return
     }
     
+    // Validasi untuk per-person slots
+    if (selectedSlot.isPerPerson) {
+        if (!lineForm.value.jumlah_orang || lineForm.value.jumlah_orang < 1) {
+            toast.add({severity:'warn', summary:'Warning', detail:'Please enter number of people', life: 3000})
+            return
+        }
+        
+        // Check availability
+        const capacity = await adminBookingService.getSlotCapacity(selectedSlot.id, lineForm.value.tanggal);
+        const currentBooked = capacity.data || 0;
+        const remaining = lineForm.value.capacity - currentBooked;
+        
+        if (lineForm.value.jumlah_orang > remaining) {
+            toast.add({
+                severity:'warn', 
+                summary:'Warning', 
+                detail:`Only ${remaining} spots available. Currently ${currentBooked} people booked.`, 
+                life: 4000
+            })
+            return
+        }
+    }
+    
     // Jika memilih "All Day", tambahkan semua slot untuk tanggal tersebut
     if(selectedSlot.isAllDay) {
-        // Filter hanya slot yang bukan "All Day"
-        const regularSlots = availableSlots.value.filter(s => !s.isAllDay)
+        // Filter hanya slot yang bukan "All Day" dan bukan per-person
+        const regularSlots = availableSlots.value.filter(s => !s.isAllDay && !s.isPerPerson)
         
         // Hitung harga per slot berdasarkan harga total yang di-nego
         const negotiatedTotalPrice = lineForm.value.price
@@ -461,7 +620,7 @@ const saveLine = async () => {
             const adjustedPrice = Math.round(slot.price * priceRatio)
             
             const newLine = {
-                temp_id: Date.now() + Math.random(), // ID unik untuk setiap line
+                temp_id: Date.now() + Math.random(),
                 bo_slot_id: slot.id,
                 tanggal: new Date(lineForm.value.tanggal).toISOString(),
                 price: adjustedPrice,
@@ -475,7 +634,6 @@ const saveLine = async () => {
                 dataslot.value[slot.id] = slot
             }
             
-            form.value.grandtotal = (form.value.grandtotal || 0) + adjustedPrice
             totalAdded++
         })
         
@@ -495,22 +653,43 @@ const saveLine = async () => {
             slot_data: selectedSlot
         }
         
-        tempDataline.value.push(newLine)
+        // Jika per-person slot, tambahkan ke jogging lines
+        if (selectedSlot.isPerPerson) {
+            newLine.jumlah_orang = lineForm.value.jumlah_orang;
+            newLine.harga_per_orang = lineForm.value.harga_per_orang;
+            tempJoggingLines.value.push(newLine);
+        } else {
+            tempDataline.value.push(newLine);
+        }
         
         // Update dataslot untuk display
         if(!dataslot.value[selectedSlot.id]) {
             dataslot.value[selectedSlot.id] = selectedSlot
         }
         
-        form.value.grandtotal = (form.value.grandtotal || 0) + lineForm.value.price
-        
-        toast.add({severity:'success', summary:'Success', detail:'Line added to cart', life: 3000})
+        toast.add({severity:'success', summary:'Success', detail:'Line added successfully', life: 3000})
     }
     
-    showLineDialog.value = false
-    lineForm.value = {}
+    // Dialog tetap terbuka untuk tambah line lagi dengan tanggal yang sama
+    // showLineDialog.value = false
+    
+    // Reset hanya slot dan price, tanggal tetap sama
+    lineForm.value.bo_slot_id = null
+    lineForm.value.price = 0
+    lineForm.value.jumlah_orang = 1
+    lineForm.value.harga_per_orang = 0
+    lineForm.value.isPerPerson = false
+    
     isAllDaySelected.value = false
     originalAllDayPrice.value = 0
+}
+
+const saveLineAndClose = async () => {
+    await saveLine()
+    if (!isLineLoading.value) {
+        showLineDialog.value = false
+        lineForm.value = {}
+    }
 }
 
 const deleteLine = (line) => {
@@ -529,18 +708,31 @@ const deleteLine = (line) => {
         },
         accept: () => {
             // Jika ada temp_id, artinya belum disave, hapus dari temp array
-            reduceGrandTotal(line.price)
             if(line.temp_id) {
-                const index = tempDataline.value.findIndex(l => l.temp_id === line.temp_id)
+                // Cek apakah di tempDataline atau tempJoggingLines
+                let index = tempDataline.value.findIndex(l => l.temp_id === line.temp_id)
                 if(index > -1) {
                     tempDataline.value.splice(index, 1)
                     toast.add({severity:'success', summary:'Success', detail:'Line removed', life: 3000})
+                    return
+                }
+                
+                index = tempJoggingLines.value.findIndex(l => l.temp_id === line.temp_id)
+                if(index > -1) {
+                    tempJoggingLines.value.splice(index, 1)
+                    toast.add({severity:'success', summary:'Success', detail:'Line removed', life: 3000})
+                    return
                 }
             } 
             // Jika ada id (dari DB), hapus dari database
             else if(line.id) {
                 isLineLoading.value = true
-                svcline.delete(line.id).then(async result => {
+                
+                // Cek apakah line ini punya jumlah_orang (jogging line)
+                const isJoggingLine = line.hasOwnProperty('jumlah_orang');
+                const serviceToUse = isJoggingLine ? new RestService('bo_bookingline_jogging') : svcline;
+                
+                serviceToUse.delete(line.id).then(async result => {
                     if(result.error){
                         toast.add({severity:'error', summary:'Error', detail:result.error.message, life: 3000})
                     } else {
@@ -548,20 +740,18 @@ const deleteLine = (line) => {
                         await fetchBookingLines(form.value.id)
                     }
                     isLineLoading.value = false
+                }).catch(err => {
+                    toast.add({severity:'error', summary:'Error', detail:err})
+                    isLineLoading.value = false
                 })
             }
         }
     })
 }
 
-const reduceGrandTotal = (price) => {
-    const val = Number(price) || 0
-    form.value.grandtotal = Math.max(0, (Number(form.value.grandtotal) || 0) - val)
-}
-
 const onRefresh = ()=>{
     isloading.value = true
-    svc.list(0,25,props.sortby).then(e=>{
+    svc.list(0,250,props.sortby).then(e=>{
         data.value = e.data
         isloading.value = false
     }).catch(err=>{
@@ -582,18 +772,7 @@ onMounted(()=>{
     props.columns.forEach(d=>{
         if(d.type=='options'){
             const refsvc = new RestService(d.source.model)
-            
-            // Filter yang isactive = true
-            const whereclause = [
-                {
-                    field: 'isactive',
-                    op: 'eq',
-                    value: true
-                }
-            ]
-            
-            // Gunakan listwhere dengan filter isactive
-            refsvc.listwhere(0, 250, whereclause).then(r=>{
+            refsvc.list(0, 1000).then(r=>{
                 if(r.data){
                     references.value[d.field] = r.data
                     let xv = {}
@@ -602,14 +781,34 @@ onMounted(()=>{
                     })
                     refvalue.value[d.field] = xv
                 }
-            }).catch(err => {
-                console.error('Error loading options:', err)
             })
         }
     })
 
     onRefresh()
 })
+
+// Computed untuk menggabungkan semua lines (regular + jogging + temp)
+const allDisplayLines = computed(() => {
+    let allLines = [];
+    
+    // Tambahkan dataline yang sudah tersimpan
+    if (isupdating.value && dataline.value) {
+        allLines = [...dataline.value];
+    }
+    
+    // Tambahkan tempDataline
+    if (tempDataline.value) {
+        allLines = [...allLines, ...tempDataline.value];
+    }
+    
+    // Tambahkan tempJoggingLines
+    if (tempJoggingLines.value) {
+        allLines = [...allLines, ...tempJoggingLines.value];
+    }
+    
+    return allLines;
+});
 
 </script>
 <template>
@@ -618,14 +817,14 @@ onMounted(()=>{
         <div class="flex flex-wrap gap-2">
             <Button v-if="listview" @click="exportCSV" icon="pi pi-download" variant="text"></Button>
             <Button v-if="listview" @click="onRefresh" icon="pi pi-refresh" variant="text"></Button>
-            <Button v-if="listview" @click="onAdd" severity="primary" icon="pi pi-plus" :label="$t('Add')"></Button>
-            <Button v-if="!listview" @click="{listview=true;isupdating=false;form={}}" :disabled="isloading" severity="secondary" :label="$t('Cancel')" variant="outlined"></Button>
+            <Button v-if="listview" @click="onAdd" severity="primary" icon="pi pi-plus" :label="$t('Create Booking')"></Button>
+            <Button v-if="!listview" @click="{listview=true;isupdating=false;form={};tempDataline=[];tempJoggingLines=[]}" :disabled="isloading" severity="secondary" :label="$t('Cancel')" variant="outlined"></Button>
             <Button v-if="!listview" @click="onSave" :disabled="isloading" severity="success" :label="$t('Save')" class="ml-3"></Button>
         </div>
     </div>
     <div class="bg-white rounded ">
         <div v-if="listview">
-            <Table :value="data" ref="dt" resizableColumns columnResizeMode="fit" sortMode="multiple" :loading="isloading">
+            <Table :value="data" ref="dt" resizableColumns columnResizeMode="fit" sortMode="multiple" :loading="isloading" paginator :rows="25" :rowsPerPageOptions="[10, 25, 50, 100]">
                 <template #header v-if="props.searchfield">
                     <div class="flex flex-wrap justify-between">
                         <IconField>
@@ -668,8 +867,7 @@ onMounted(()=>{
                 </div>
                 <div class="flex flex-wrap my-2">
                     <template v-for="col of props.columns">
-                        <!-- Tambahkan kondisi isdisplayed di sini -->
-                        <div v-if="col.isdisplayed !== false" class="flex flex-col w-1/3 gap-2 pr-5 my-2">
+                        <div class="flex flex-col w-1/3 gap-2 pr-5 my-2" v-if="col.isdisplayed">
                             <template v-if="col.type=='string'">
                                 <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
                                 <InputText :id="col.name" v-model="form[col.field]" :disabled="col.readonly" />
@@ -688,13 +886,13 @@ onMounted(()=>{
                             </template>
                             <template v-if="col.type=='options'">
                                 <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
-                                <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly"></Dropdown>
+                                <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly" filter></Dropdown>
                             </template>
                         </div>
                     </template>
                 </div>
                 <div class="mt-5"><span class="text-red">(*) Mandatory field</span></div>
-                {{ props.details }}
+                
                 <div class="mt-5">
                     <h3 class="mb-3 text-lg font-bold">Booking Lines</h3>
                     <div class="mb-3">
@@ -706,47 +904,68 @@ onMounted(()=>{
                             :disabled="!form.bo_venue_id"
                         ></Button>
                     </div>
-                    <Table :value="isupdating ? dataline : tempDataline" :loading="isloading">
+                    
+                    <!-- Summary Card -->
+                    <div class="p-4 mb-4 bg-blue-50 rounded-lg">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <div class="text-sm text-gray-600">Total Lines</div>
+                                <div class="text-2xl font-bold">{{ allDisplayLines.length }}</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-sm text-gray-600">Grand Total</div>
+                                <div class="text-2xl font-bold text-green-600">{{ formatCurrency(calculatedGrandTotal) }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <Table :value="allDisplayLines" :loading="isloading">
                         <template #empty>No booking lines found.</template>
                         <template #loading>Loading booking lines...</template>
 
-                        <Column header="Tanggal">
+                        <Column header="Tanggal" style="min-width: 120px">
                             <template #body="slotProps">
                                 {{ slotProps.data.tanggal ? new Date(slotProps.data.tanggal).toLocaleDateString('id-ID') : '-' }}
                             </template>
                         </Column>
 
-                        <Column header="Slot Name">
+                        <Column header="Slot Name" style="min-width: 150px">
                             <template #body="slotProps">
                                 {{ slotProps.data.slot_data?.name || dataslot[slotProps.data.bo_slot_id]?.name || '-' }}
                             </template>
                         </Column>
 
-                        <Column header="Jam Mulai">
+                        <Column header="Time" style="min-width: 150px">
                             <template #body="slotProps">
                                 {{ slotProps.data.slot_data?.start_time || dataslot[slotProps.data.bo_slot_id]?.start_time || '-' }}
-                            </template>
-                        </Column>
-                        <Column header="Jam Selesai">
-                            <template #body="slotProps">
+                                -
                                 {{ slotProps.data.slot_data?.end_time || dataslot[slotProps.data.bo_slot_id]?.end_time || '-' }}
                             </template>
                         </Column>
-                        <Column header="Description">
+                        
+                        <Column header="Type" style="min-width: 100px">
                             <template #body="slotProps">
-                                {{ slotProps.data.slot_data?.description || dataslot[slotProps.data.bo_slot_id]?.description || '-' }}
+                                <Tag v-if="slotProps.data.jumlah_orang" severity="info" value="Per Person"></Tag>
+                                <Tag v-else severity="success" value="Full Slot"></Tag>
                             </template>
                         </Column>
                         
-                        <Column field="price" header="Price">
+                        <Column header="People" style="min-width: 80px">
+                            <template #body="slotProps">
+                                <span v-if="slotProps.data.jumlah_orang">{{ slotProps.data.jumlah_orang }} people</span>
+                                <span v-else>-</span>
+                            </template>
+                        </Column>
+                        
+                        <Column field="price" header="Price" style="min-width: 120px">
                             <template #body="slotProps">
                                 <div class="text-right">{{ formatCurrency(slotProps.data.price) }}</div>
                             </template>
                         </Column>
                         
-                        <Column header="Action">
+                        <Column header="Action" style="min-width: 80px">
                             <template #body="slotProps">
-                                <Button icon="pi pi-trash" @click="deleteLine(slotProps.data)" severity="secondary" variant="text"></Button>
+                                <Button icon="pi pi-trash" @click="deleteLine(slotProps.data)" severity="danger" variant="text"></Button>
                             </template>
                         </Column>
                     </Table>
@@ -782,24 +1001,48 @@ onMounted(()=>{
                                         <span>
                                             <strong v-if="slotProps.option.isAllDay">{{ slotProps.option.name }}</strong>
                                             <template v-else>
-                                                {{ slotProps.option.name }} ({{ slotProps.option.start_time }} - {{ slotProps.option.end_time }})
+                                                {{ slotProps.option.name }}
+                                                <span v-if="!slotProps.option.isPerPerson">
+                                                    ({{ slotProps.option.start_time }} - {{ slotProps.option.end_time }})
+                                                </span>
+                                                <Tag v-if="slotProps.option.isPerPerson" severity="info" value="Per Person" class="ml-2"></Tag>
                                             </template>
                                         </span>
-                                        <span class="font-bold">{{ formatCurrency(slotProps.option.price) }}</span>
+                                        <span class="font-bold">
+                                            {{ slotProps.option.isPerPerson 
+                                                ? formatCurrency(slotProps.option.pricePerPerson) + '/person' 
+                                                : formatCurrency(slotProps.option.price) 
+                                            }}
+                                        </span>
                                     </div>
                                 </template>
                             </Dropdown>
+                        </div>
+                        
+                        <!-- Show jumlah orang untuk per-person slots -->
+                        <div v-if="lineForm.isPerPerson" class="flex flex-col gap-2">
+                            <label for="jumlah_orang">Number of People <span class="text-red">*</span></label>
+                            <InputNumber 
+                                id="jumlah_orang" 
+                                v-model="lineForm.jumlah_orang" 
+                                :min="1"
+                                :max="lineForm.capacity"
+                            />
+                            <small v-if="lineForm.capacity" class="text-gray-600">
+                                Maximum capacity: {{ lineForm.capacity }} people
+                            </small>
                         </div>
                         
                         <div class="flex flex-col gap-2">
                             <label for="price">
                                 Price 
                                 <span v-if="isAllDaySelected" class="text-blue-600">(Negotiable)</span>
+                                <span v-else-if="lineForm.isPerPerson" class="text-gray-600">(Auto calculated)</span>
                             </label>
                             <InputNumber 
                                 id="price" 
                                 v-model="lineForm.price" 
-                                :disabled="!isAllDaySelected" 
+                                :disabled="!isAllDaySelected && lineForm.isPerPerson" 
                                 mode="currency" 
                                 currency="IDR" 
                                 locale="id-ID" 
@@ -807,43 +1050,22 @@ onMounted(()=>{
                             <small v-if="isAllDaySelected" class="text-gray-600">
                                 Original price: {{ formatCurrency(originalAllDayPrice) }} - You can adjust the price
                             </small>
+                            <small v-if="lineForm.isPerPerson && !isAllDaySelected" class="text-gray-600">
+                                {{ formatCurrency(lineForm.harga_per_orang) }} × {{ lineForm.jumlah_orang }} people
+                            </small>
                         </div>
                     </div>
                     
                     <template #footer>
-                        <Button label="Cancel" severity="secondary" @click="showLineDialog = false" outlined />
-                        <Button label="Save" @click="saveLine" :loading="isLineLoading" />
+                        <div class="flex justify-between w-full">
+                            <Button label="Close" severity="secondary" @click="showLineDialog = false" outlined />
+                            <div class="flex gap-2">
+                                <Button label="Add & Continue" @click="saveLine" :loading="isLineLoading" outlined />
+                                <Button label="Add & Close" @click="saveLineAndClose" :loading="isLineLoading" />
+                            </div>
+                        </div>
                     </template>
                 </Dialog>
-                <div class="mt-5" v-if="props.details">
-                    <Tabs value="0">
-                        <TabList>
-                            <Tab value="0">Header I</Tab>
-                            <Tab value="1">Header II</Tab>
-                            <Tab value="2">Header III</Tab>
-                        </TabList>
-                        <TabPanels>
-                            <TabPanel value="0">
-                                <p class="m-0">
-                                    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo
-                                    consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-                                </p>
-                            </TabPanel>
-                            <TabPanel value="1">
-                                <p class="m-0">
-                                    Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim
-                                    ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Consectetur, adipisci velit, sed quia non numquam eius modi.
-                                </p>
-                            </TabPanel>
-                            <TabPanel value="2">
-                                <p class="m-0">
-                                    At vero eos et accusamus et iusto odio dignissimos ducimus qui blanditiis praesentium voluptatum deleniti atque corrupti quos dolores et quas molestias excepturi sint occaecati cupiditate non provident, similique sunt in culpa
-                                    qui officia deserunt mollitia animi, id est laborum et dolorum fuga. Et harum quidem rerum facilis est et expedita distinctio. Nam libero tempore, cum soluta nobis est eligendi optio cumque nihil impedit quo minus.
-                                </p>
-                            </TabPanel>
-                        </TabPanels>
-                    </Tabs>
-                </div>
             </div>
         </div>
     </div>
