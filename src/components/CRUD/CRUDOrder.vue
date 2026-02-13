@@ -41,6 +41,8 @@ const tempJoggingLines = ref([])
 const isAllDaySelected = ref(false)
 const originalAllDayPrice = ref(0)
 const existingBookings = ref([])
+const selectedSlotIds = ref([])
+const perPersonForm = ref({})
 
 // Venue filter
 const venues = ref([])
@@ -615,6 +617,8 @@ const addLine = async () => {
     
     isAllDaySelected.value = false
     originalAllDayPrice.value = 0
+    selectedSlotIds.value = []
+    perPersonForm.value = {}
     
     showLineDialog.value = true
 }
@@ -710,120 +714,111 @@ watch(() => lineForm.value.jumlah_orang, (newValue) => {
     }
 });
 
-const saveLine = async () => {
-    if(!lineForm.value.bo_slot_id) {
-        toast.add({severity:'warn', summary:'Warning', detail:'Please select a slot', life: 3000})
-        return
+const onToggleAllDay = async (checked) => {
+    if (checked) {
+        // Pilih semua regular slot yang tidak booked
+        selectedSlotIds.value = availableSlots.value
+            .filter(s => !s.isAllDay && !s.isPerPerson && !s.isBooked)
+            .map(s => s.id)
+    } else {
+        selectedSlotIds.value = []
     }
-    
-    if(!lineForm.value.tanggal) {
+}
+
+const onToggleSlot = (slot) => {
+    const idx = selectedSlotIds.value.indexOf(slot.id)
+    if (idx > -1) {
+        selectedSlotIds.value.splice(idx, 1)
+    } else {
+        // Jika memilih per-person, pastikan jumlah_orang ada
+        selectedSlotIds.value.push(slot.id)
+        if (slot.isPerPerson && !perPersonForm.value[slot.id]) {
+            perPersonForm.value[slot.id] = { jumlah_orang: 1, price: slot.pricePerPerson || 0 }
+        }
+    }
+}
+
+const onJumlahOrangChange = (slot) => {
+    if (perPersonForm.value[slot.id]) {
+        perPersonForm.value[slot.id].price = slot.pricePerPerson * (perPersonForm.value[slot.id].jumlah_orang || 1)
+    }
+}
+
+const isAllRegularSelected = computed(() => {
+    const regularSlots = availableSlots.value.filter(s => !s.isAllDay && !s.isPerPerson && !s.isBooked)
+    return regularSlots.length > 0 && regularSlots.every(s => selectedSlotIds.value.includes(s.id))
+})
+
+const saveMultipleSlots = async () => {
+    if (!lineForm.value.tanggal) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please select a booking date', life: 3000})
         return
     }
     
-    const selectedSlot = availableSlots.value.find(s => s.id === lineForm.value.bo_slot_id)
-    
-    if(!selectedSlot) {
-        toast.add({severity:'error', summary:'Error', detail:'Slot not found'})
+    if (selectedSlotIds.value.length === 0) {
+        toast.add({severity:'warn', summary:'Warning', detail:'Please select at least one slot', life: 3000})
         return
     }
     
-    // Validasi untuk per-person slots
-    if (selectedSlot.isPerPerson) {
-        if (!lineForm.value.jumlah_orang || lineForm.value.jumlah_orang < 1) {
-            toast.add({severity:'warn', summary:'Warning', detail:'Please enter number of people', life: 3000})
-            return
-        }
-        
-        // Check availability
-        const capacity = await adminBookingService.getSlotCapacity(selectedSlot.id, lineForm.value.tanggal);
-        const currentBooked = capacity.data || 0;
-        const remaining = lineForm.value.capacity - currentBooked;
-        
-        if (lineForm.value.jumlah_orang > remaining) {
-            toast.add({
-                severity:'warn', 
-                summary:'Warning', 
-                detail:`Only ${remaining} spots available. Currently ${currentBooked} people booked.`, 
-                life: 3000
-            })
-            return
-        }
-    }
-    
-    // Jika All Day dipilih, save semua regular slots
-    if(selectedSlot.isAllDay) {
-        const regularSlots = availableSlots.value.filter(s => !s.isPerPerson && !s.isAllDay && !s.isBooked)
-        if (regularSlots.length === 0) {
-            toast.add({severity:'warn', summary:'All Day Tidak Tersedia', detail:'Semua slot sudah dibooking untuk tanggal ini', life: 3000})
-            return
-        }
-        const totalSlots = regularSlots.length
-        const pricePerSlot = lineForm.value.price / totalSlots
-        
-        regularSlots.forEach(slot => {
-            const newLine = {
-                temp_id: Date.now() + Math.random(),
-                bo_slot_id: slot.id,
-                tanggal: lineForm.value.tanggal,
-                price: pricePerSlot,
-                slot_data: slot
+    // Validasi per-person slots harus ada jumlah_orang
+    for (const slotId of selectedSlotIds.value) {
+        const slot = availableSlots.value.find(s => s.id === slotId)
+        if (slot && slot.isPerPerson) {
+            const pp = perPersonForm.value[slotId]
+            if (!pp || !pp.jumlah_orang || pp.jumlah_orang < 1) {
+                toast.add({severity:'warn', summary:'Warning', detail:`Please enter number of people for slot: ${slot.name}`, life: 3000})
+                return
             }
-            tempDataline.value.push(newLine)
-        })
+        }
+    }
+    
+    let addedCount = 0
+    for (const slotId of selectedSlotIds.value) {
+        const slot = availableSlots.value.find(s => s.id === slotId)
+        if (!slot) continue
         
-        toast.add({severity:'success', summary:'Success', detail:`Added ${totalSlots} slots for all day booking`, life: 3000})
-    } 
-    // Jika per-person, save ke tempJoggingLines
-    else if (selectedSlot.isPerPerson) {
-        const newLine = {
-            temp_id: Date.now(),
-            bo_slot_id: lineForm.value.bo_slot_id,
-            tanggal: lineForm.value.tanggal,
-            jumlah_orang: lineForm.value.jumlah_orang,
-            harga_per_orang: lineForm.value.harga_per_orang,
-            price: lineForm.value.price,
-            slot_data: selectedSlot
+        // Skip jika sudah ada di temp lines
+        const already = [...tempDataline.value, ...tempJoggingLines.value].find(line =>
+            line.bo_slot_id === slotId &&
+            new Date(line.tanggal).toISOString().slice(0,10) === new Date(lineForm.value.tanggal).toISOString().slice(0,10)
+        )
+        if (already) continue
+        
+        if (slot.isPerPerson) {
+            const pp = perPersonForm.value[slotId]
+            const jumlah = pp?.jumlah_orang || 1
+            const priceInfo = await adminBookingService.getSlotPrice(form.value.bo_venue_id, slotId, lineForm.value.tanggal)
+            tempJoggingLines.value.push({
+                temp_id: Date.now() + Math.random(),
+                bo_slot_id: slotId,
+                tanggal: lineForm.value.tanggal,
+                jumlah_orang: jumlah,
+                harga_per_orang: priceInfo.pricePerPerson,
+                price: priceInfo.pricePerPerson * jumlah,
+                slot_data: slot
+            })
+        } else {
+            const priceInfo = await adminBookingService.getSlotPrice(form.value.bo_venue_id, slotId, lineForm.value.tanggal)
+            tempDataline.value.push({
+                temp_id: Date.now() + Math.random(),
+                bo_slot_id: slotId,
+                tanggal: lineForm.value.tanggal,
+                price: priceInfo.price,
+                slot_data: slot
+            })
         }
-        tempJoggingLines.value.push(newLine)
-        toast.add({severity:'success', summary:'Success', detail:'Booking line added', life: 3000})
-    } 
-    // Regular slot
-    else {
-        const newLine = {
-            temp_id: Date.now(),
-            bo_slot_id: lineForm.value.bo_slot_id,
-            tanggal: lineForm.value.tanggal,
-            price: lineForm.value.price,
-            slot_data: selectedSlot
-        }
-        tempDataline.value.push(newLine)
-        toast.add({severity:'success', summary:'Success', detail:'Booking line added', life: 3000})
+        addedCount++
     }
     
-    // Reset form
-    const currentDate = lineForm.value.tanggal
-    lineForm.value = {
-        bo_booking_id: form.value.id,
-        bo_slot_id: null,
-        tanggal: currentDate,
-        price: 0,
-        jumlah_orang: 1,
-        harga_per_orang: 0
+    if (addedCount > 0) {
+        toast.add({severity:'success', summary:'Success', detail:`${addedCount} slot(s) added`, life: 3000})
     }
     
-    isAllDaySelected.value = false
-    originalAllDayPrice.value = 0
-    
-    await fetchAvailableSlots(form.value.bo_venue_id, currentDate)
+    showLineDialog.value = false
+    selectedSlotIds.value = []
+    perPersonForm.value = {}
 }
 
-const saveLineAndClose = async () => {
-    await saveLine()
-    if (lineForm.value.bo_slot_id === null) {
-        showLineDialog.value = false
-    }
-}
 
 const deleteLine = (line) => {
     confirm.require({
@@ -1056,30 +1051,31 @@ const linesByDate = computed(() => {
 
 </script>
 <template>
-    <div class="flex items-center justify-between p-2 mb-4 space-x-2">
-        <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center justify-between p-2 mb-4 gap-2">
+        <div class="flex items-center gap-2 min-w-0">
             <Button 
                 v-if="!showVenueList && listview" 
                 @click="{showVenueList=true;selectedVenue=null}" 
                 icon="pi pi-arrow-left" 
                 variant="text"
                 severity="secondary"
+                class="shrink-0"
             ></Button>
-            <h2 class="text-3xl font-bold">
+            <h2 class="text-xl sm:text-2xl md:text-3xl font-bold truncate">
                 {{ showVenueList ? props.title : selectedVenue?.name }}
             </h2>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-2 shrink-0">
             <Button v-if="listview && !showVenueList" @click="exportCSV" icon="pi pi-download" variant="text"></Button>
             <Button v-if="listview && !showVenueList" @click="onRefresh" icon="pi pi-refresh" variant="text"></Button>
             <Button v-if="listview && !showVenueList" @click="onAdd" severity="primary" icon="pi pi-plus" :label="$t('Create Order')"></Button>
             <Button v-if="!listview" @click="{listview=true;isupdating=false;form={};tempDataline=[];tempJoggingLines=[];existingBookings=[]}" :disabled="isloading" severity="secondary" :label="$t('Cancel')" variant="outlined"></Button>
-            <Button v-if="!listview" @click="onSave" :disabled="isloading" severity="success" :label="$t('Save')" class="ml-3"></Button>
+            <Button v-if="!listview" @click="onSave" :disabled="isloading" severity="success" :label="$t('Save')"></Button>
         </div>
     </div>
     <div class="bg-white rounded">
         <!-- Venue Cards List -->
-        <div v-if="listview && showVenueList" class="p-6">
+        <div v-if="listview && showVenueList" class="p-3 sm:p-6">
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 <div 
                     v-for="venue in venues" 
@@ -1161,25 +1157,25 @@ const linesByDate = computed(() => {
             </Table>
         </div>
         <!-- Order Form -->
-        <div v-if="!listview" class="p-6">
+        <div v-if="!listview" class="p-3 sm:p-6">
             <div class="mb-6">
-                <span class="pb-3 text-xl font-bold">{{isupdating?$t('Edit'):$t('Create New')}} {{ props.entity }}</span>
+                <span class="pb-3 text-lg sm:text-xl font-bold">{{isupdating?$t('Edit'):$t('Create New')}} {{ props.entity }}</span>
             </div>
-            <div class="flex flex-wrap my-2">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 my-2">
                 <template v-for="col of props.columns">
                     <!-- Tampilkan field yang isdisplayed === true -->
-                    <div v-if="col.isdisplayed === true" class="flex flex-col w-1/3 gap-2 pr-5 my-2">
+                    <div v-if="col.isdisplayed === true" class="flex flex-col gap-2">
                         <template v-if="col.type=='text' || col.type=='string'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
                             <InputText :id="col.name" v-model="form[col.field]" :disabled="col.readonly" />
                         </template>
                         <template v-if="col.type=='date'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
-                            <DatePicker :id="col.name" v-model="form[col.field]" :disabled="col.readonly" dateFormat="dd/mm/yy"/>
+                            <DatePicker :id="col.name" v-model="form[col.field]" :disabled="col.readonly" dateFormat="dd/mm/yy" class="w-full"/>
                         </template>
                         <template v-if="col.type=='currency'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
-                            <InputNumber :id="col.name" v-model="form[col.field]" :disabled="col.readonly" mode="currency" currency="IDR" locale="id-ID" />
+                            <InputNumber :id="col.name" v-model="form[col.field]" :disabled="col.readonly" mode="currency" currency="IDR" locale="id-ID" class="w-full"/>
                         </template>
                         <template v-if="col.type=='boolean'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
@@ -1187,22 +1183,23 @@ const linesByDate = computed(() => {
                         </template>
                         <template v-if="col.type=='options'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
-                            <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly"></Dropdown>
+                            <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly" :filter="!col.source.staticOptions" filterPlaceholder="Search..." class="w-full"></Dropdown>
                         </template>
                     </div>
                 </template>
             </div>
             <div class="mt-5"><span class="text-red">(*) Mandatory field</span></div>
             
-            <div class="mt-8">
+            <div class="mt-6 sm:mt-8">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold">Booking Lines</h3>
+                    <h3 class="text-base sm:text-lg font-bold">Booking Lines</h3>
                     <Button 
                         @click="addLine" 
                         severity="primary" 
                         icon="pi pi-plus" 
                         :label="$t('Add Line')"
                         :disabled="!form.bo_venue_id"
+                        size="small"
                     ></Button>
                 </div>
                 
@@ -1242,7 +1239,33 @@ const linesByDate = computed(() => {
                     </div>
                     
                     <!-- Slots Table for this date -->
-                    <div class="overflow-x-auto">
+                    <!-- Mobile: card list -->
+                    <div class="block sm:hidden divide-y border rounded-lg overflow-hidden">
+                        <div 
+                            v-for="line in dateGroup.lines" 
+                            :key="line.temp_id || line.id"
+                            class="flex items-center justify-between p-3 bg-white"
+                        >
+                            <div class="flex-1 min-w-0">
+                                <div class="font-medium text-sm truncate">
+                                    {{ line.slot_data?.name || dataslot[line.bo_slot_id]?.name || '-' }}
+                                </div>
+                                <div class="text-xs text-gray-500 mt-0.5">
+                                    {{ line.slot_data?.start_time || dataslot[line.bo_slot_id]?.start_time || '' }}
+                                    {{ (line.slot_data?.start_time || dataslot[line.bo_slot_id]?.start_time) ? '-' : '' }}
+                                    {{ line.slot_data?.end_time || dataslot[line.bo_slot_id]?.end_time || '' }}
+                                </div>
+                                <div class="flex items-center gap-2 mt-1">
+                                    <Tag v-if="line.jumlah_orang" severity="info" :value="`${line.jumlah_orang} people`" class="text-xs"></Tag>
+                                    <Tag v-else severity="success" value="Full Slot" class="text-xs"></Tag>
+                                    <span class="text-sm font-semibold text-green-600">{{ formatCurrency(line.price) }}</span>
+                                </div>
+                            </div>
+                            <Button icon="pi pi-trash" @click="deleteLine(line)" severity="danger" variant="text" size="small" class="ml-2 shrink-0"></Button>
+                        </div>
+                    </div>
+                    <!-- Desktop: table -->
+                    <div class="hidden sm:block overflow-x-auto">
                         <Table :value="dateGroup.lines" class="min-w-full">
                             <Column header="Slot Name" class="whitespace-nowrap">
                                 <template #body="slotProps">
@@ -1288,7 +1311,7 @@ const linesByDate = computed(() => {
                 </div>
             </div>
 
-            <Dialog v-model:visible="showLineDialog" modal header="Add Booking Line" :style="{ width: '35rem' }">
+            <Dialog v-model:visible="showLineDialog" modal header="Add Booking Line" :style="{ width: 'min(95vw, 38rem)' }">
                 <div class="flex flex-col gap-4">
                     <div class="flex flex-col gap-2">
                         <label for="bookingdate">Booking Date <span class="text-red">*</span></label>
@@ -1301,87 +1324,105 @@ const linesByDate = computed(() => {
                     </div>
                     
                     <div class="flex flex-col gap-2">
-                        <label for="slot">Slot <span class="text-red">*</span></label>
-                        <Dropdown 
-                            id="slot" 
-                            v-model="lineForm.bo_slot_id" 
-                            :options="availableSlots.filter(s => !s.isBooked)" 
-                            optionLabel="name" 
-                            optionValue="id"
-                            :loading="isLineLoading"
-                            @change="onSlotChange(lineForm.bo_slot_id)"
-                            placeholder="Select a slot"
-                        >
-                            <template #option="slotProps">
-                                <div class="flex justify-between w-full">
-                                    <span :class="slotProps.option.isBooked ? 'text-gray-400 line-through' : ''">
-                                        <strong v-if="slotProps.option.isAllDay">{{ slotProps.option.name }}</strong>
-                                        <template v-else>
-                                            {{ slotProps.option.name }}
-                                            <span v-if="!slotProps.option.isPerPerson">
-                                                ({{ slotProps.option.start_time }} - {{ slotProps.option.end_time }})
-                                            </span>
-                                            <Tag v-if="slotProps.option.isPerPerson" severity="info" value="Per Person" class="ml-2"></Tag>
-                                        </template>
-                                    </span>
-                                    <span class="font-bold">
-                                        {{ slotProps.option.isPerPerson 
-                                            ? formatCurrency(slotProps.option.pricePerPerson) + '/person' 
-                                            : formatCurrency(slotProps.option.price) 
-                                        }}
-                                        <span v-if="slotProps.option.isBooked" class="ml-2 text-xs text-red-600">
-                                            ({{ slotProps.option.bookingStatus }})
-                                        </span>
-                                    </span>
+                        <label>Slot <span class="text-red">*</span></label>
+                        <div v-if="isLineLoading" class="flex items-center gap-2 text-gray-500 p-2">
+                            <i class="pi pi-spin pi-spinner"></i> Loading slots...
+                        </div>
+                        <div v-else-if="availableSlots.length === 0" class="text-gray-500 p-2">
+                            No slots available.
+                        </div>
+                        <div v-else class="border rounded-lg overflow-hidden">
+                            <!-- Select All Regular Slots -->
+                            <div 
+                                class="flex items-center justify-between px-3 py-2 bg-gray-100 border-b cursor-pointer hover:bg-gray-200"
+                                @click.stop="onToggleAllDay(!isAllRegularSelected)"
+                            >
+                                <div class="flex items-center gap-3">
+                                    <input 
+                                        type="checkbox" 
+                                        :checked="isAllRegularSelected" 
+                                        @change.stop="onToggleAllDay($event.target.checked)"
+                                        class="w-4 h-4 accent-blue-600 cursor-pointer"
+                                    />
+                                    <span class="font-bold text-gray-700">All Day (select all regular slots)</span>
                                 </div>
-                            </template>
-                        </Dropdown>
-                    </div>
-                    
-                    <!-- Show jumlah orang untuk per-person slots -->
-                    <div v-if="lineForm.isPerPerson" class="flex flex-col gap-2">
-                        <label for="jumlah_orang">Number of People <span class="text-red">*</span></label>
-                        <InputNumber 
-                            id="jumlah_orang" 
-                            v-model="lineForm.jumlah_orang" 
-                            :min="1"
-                            :max="lineForm.capacity"
-                        />
-                        <small v-if="lineForm.capacity" class="text-gray-600">
-                            Maximum capacity: {{ lineForm.capacity }} people
-                        </small>
-                    </div>
-                    
-                    <div class="flex flex-col gap-2">
-                        <label for="price">
-                            Price 
-                            <span v-if="isAllDaySelected" class="text-blue-600">(Negotiable)</span>
-                            <span v-else-if="lineForm.isPerPerson" class="text-gray-600">(Auto calculated)</span>
-                        </label>
-                        <InputNumber 
-                            id="price" 
-                            v-model="lineForm.price" 
-                            :disabled="!isAllDaySelected && lineForm.isPerPerson" 
-                            mode="currency" 
-                            currency="IDR" 
-                            locale="id-ID" 
-                        />
-                        <small v-if="isAllDaySelected" class="text-gray-600">
-                            Original price: {{ formatCurrency(originalAllDayPrice) }} - You can adjust the price
-                        </small>
-                        <small v-if="lineForm.isPerPerson && !isAllDaySelected" class="text-gray-600">
-                            {{ formatCurrency(lineForm.harga_per_orang) }} × {{ lineForm.jumlah_orang }} people
-                        </small>
+                                <span class="text-sm text-gray-500">
+                                    {{ availableSlots.filter(s => !s.isAllDay && !s.isPerPerson && !s.isBooked).length }} slots
+                                </span>
+                            </div>
+                            
+                            <!-- Slot list (exclude All Day option) -->
+                            <div class="max-h-52 sm:max-h-64 overflow-y-auto divide-y">
+                                <div 
+                                    v-for="slot in availableSlots.filter(s => !s.isAllDay)" 
+                                    :key="slot.id"
+                                    class="flex items-center justify-between px-3 py-2"
+                                    :class="slot.isBooked ? 'opacity-50 bg-gray-50' : 'hover:bg-blue-50 cursor-pointer'"
+                                    @click="!slot.isBooked && onToggleSlot(slot)"
+                                >
+                                    <div class="flex items-center gap-3 flex-1">
+                                        <input 
+                                            type="checkbox"
+                                            :checked="selectedSlotIds.includes(slot.id)"
+                                            :disabled="slot.isBooked"
+                                            @change.stop="!slot.isBooked && onToggleSlot(slot)"
+                                            class="w-4 h-4 accent-blue-600 cursor-pointer"
+                                            :class="slot.isBooked ? 'cursor-not-allowed' : ''"
+                                        />
+                                        <div class="flex-1">
+                                            <div class="flex items-center gap-2">
+                                                <span :class="slot.isBooked ? 'line-through text-gray-400' : ''">
+                                                    {{ slot.name }}
+                                                    <span v-if="!slot.isPerPerson" class="text-gray-500 text-sm">
+                                                        ({{ slot.start_time }} - {{ slot.end_time }})
+                                                    </span>
+                                                </span>
+                                                <Tag v-if="slot.isPerPerson" severity="info" value="Per Person" class="text-xs"></Tag>
+                                                <Tag v-if="slot.isBooked" severity="danger" :value="slot.bookingStatus" class="text-xs"></Tag>
+                                            </div>
+                                            <!-- Input jumlah orang untuk per-person slot yang dipilih -->
+                                            <div v-if="slot.isPerPerson && selectedSlotIds.includes(slot.id)" class="mt-1 flex items-center gap-2" @click.stop>
+                                                <small class="text-gray-600">People:</small>
+                                                <InputNumber 
+                                                    v-model="perPersonForm[slot.id].jumlah_orang"
+                                                    :min="1"
+                                                    :max="slot.capacity"
+                                                    inputClass="w-20 text-sm p-1"
+                                                    @input="onJumlahOrangChange(slot)"
+                                                />
+                                                <small class="text-gray-500">/ {{ slot.capacity }}</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="text-right ml-3 shrink-0">
+                                        <span class="font-bold text-sm">
+                                            {{ slot.isPerPerson 
+                                                ? formatCurrency(slot.pricePerPerson) + '/orang' 
+                                                : formatCurrency(slot.price) 
+                                            }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Summary selected -->
+                        <div v-if="selectedSlotIds.length > 0" class="p-2 bg-blue-50 rounded text-sm text-blue-700">
+                            <strong>{{ selectedSlotIds.length }}</strong> slot(s) selected
+                        </div>
                     </div>
                 </div>
                 
                 <template #footer>
                     <div class="flex justify-between w-full">
                         <Button label="Close" severity="secondary" @click="showLineDialog = false" outlined />
-                        <div class="flex gap-2">
-                            <Button label="Add & Continue" @click="saveLine" :loading="isLineLoading" outlined />
-                            <Button label="Add & Close" @click="saveLineAndClose" :loading="isLineLoading" />
-                        </div>
+                        <Button 
+                            label="Add Selected" 
+                            icon="pi pi-check"
+                            @click="saveMultipleSlots" 
+                            :loading="isLineLoading" 
+                            :disabled="selectedSlotIds.length === 0"
+                        />
                     </div>
                 </template>
             </Dialog>
