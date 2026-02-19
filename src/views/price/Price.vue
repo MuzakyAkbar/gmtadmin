@@ -41,7 +41,7 @@ onMounted(async () => {
 })
 
 const loadVenues = async () => {
-  const result = await svcVenue.list(0, 100, { col: 'seqno', asc: { ascending: true } })
+  const result = await svcVenue.list(0, 100, [{ col: 'seqno', asc: true }])
   if (result.data) {
     venues.value = result.data.filter(v => v.isactive)
   }
@@ -61,7 +61,7 @@ const openVenueModal = async (venue) => {
 }
 
 const loadSlots = async () => {
-  const result = await svcSlot.list(0, 100, { col: 'seqno', asc: { ascending: true } })
+  const result = await svcSlot.list(0, 100, [{ col: 'seqno', asc: true }])
   if (result.data) {
     slots.value = result.data.filter(s => s.isactive)
   }
