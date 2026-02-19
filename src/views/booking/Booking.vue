@@ -111,6 +111,7 @@ const columns = [
         child1name="bo_bookingline" 
         title="Bookings" 
         :columns="columns" 
+        :canedit="true"
         :candelete="false" 
         :sortby="{col:'created', ascending:false}"
     >

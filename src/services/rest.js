@@ -1,4 +1,3 @@
-import { ascending } from "ol/array";
 import { supabase } from "../plugins/supabaseClient";
 
 export default class RestService {
@@ -13,7 +12,29 @@ export default class RestService {
     this.objectname = objectname;
   }
 
-  listref(from, to) {
+  getById(id) {
+    if (!this.objectname) {
+      throw new Error("Object name is not set");
+    }
+    return supabase.from(this.objectname).select().eq("id", id).maybeSingle();
+  }
+
+  list(from, to, sort) {
+    if (!this.objectname) {
+      throw new Error("Object name is not set");
+    }
+    if (!from) from = 0;
+    if (!to) to = 25;
+    if (!sort) sort = [{ col: "created", asc: false }];
+    return supabase
+      .from(this.objectname)
+      .select()
+      .eq("isactive", true)
+      .range(from, to)
+      .order(sort[0].col, { ascending: sort[0].asc });
+  }
+
+  listfilter(filter, from, to) {
     if (!this.objectname) {
       throw new Error("Object name is not set");
     }
@@ -23,76 +44,33 @@ export default class RestService {
       .from(this.objectname)
       .select()
       .eq("isactive", true)
+      .eq(filter.key, filter.value)
       .range(from, to);
   }
 
-  list(from, to, sortby) {
+  listwhere(from, to, where, sort) {
     if (!this.objectname) {
       throw new Error("Object name is not set");
     }
     if (!from) from = 0;
     if (!to) to = 250;
-    if (!sortby) sortby = { col: "created", asc: { ascending: false } };
-    return supabase
-      .from(this.objectname)
-      .select(`*`, { count: "exact" })
-      .range(from, to)
-      .order(sortby.col, sortby.asc);
-  }
 
-  listwhere(from = 0, limit = 250, whereclause = [], sortby) {
-    if (!this.objectname) {
-      throw new Error("Object name is not set");
-    }
+    let query = supabase.from(this.objectname).select().range(from, to);
 
-    const to = from + limit - 1;
-
-    if (!sortby) {
-      sortby = { col: "created", ascending: false };
-    }
-
-    let query = supabase
-      .from(this.objectname)
-      .select("*", { count: "exact" })
-      .range(from, to)
-      .order(sortby.col, { ascending: sortby.ascending });
-
-    for (const clause of whereclause) {
-      switch (clause.op) {
-        case "eq":
-          query = query.eq(clause.field, clause.value);
-          break;
-        case "neq":
-          query = query.neq(clause.field, clause.value);
-          break;
-        case "gt":
-          query = query.gt(clause.field, clause.value);
-          break;
-        case "gte":
-          query = query.gte(clause.field, clause.value);
-          break;
-        case "lt":
-          query = query.lt(clause.field, clause.value);
-          break;
-        case "lte":
-          query = query.lte(clause.field, clause.value);
-          break;
-        case "like":
-          query = query.like(clause.field, `%${clause.value}%`);
-          break;
-        case "ilike":
-          query = query.ilike(clause.field, `%${clause.value}%`);
-          break;
-        case "in":
-          query = query.in(clause.field, clause.value); // array
-          break;
-        case "is":
-          query = query.is(clause.field, clause.value); // null / true / false
-          break;
-        default:
-          query = query.eq(clause.field, clause.value);
+    if (where && Array.isArray(where)) {
+      for (const w of where) {
+        if (w.op === 'eq')        query = query.eq(w.field, w.value);
+        else if (w.op === 'neq')  query = query.neq(w.field, w.value);
+        else if (w.op === 'gte')  query = query.gte(w.field, w.value);
+        else if (w.op === 'lte')  query = query.lte(w.field, w.value);
+        else if (w.op === 'gt')   query = query.gt(w.field, w.value);
+        else if (w.op === 'lt')   query = query.lt(w.field, w.value);
+        else if (w.op === 'in')   query = query.in(w.field, w.value);
+        else if (w.op === 'like') query = query.ilike(w.field, `%${w.value}%`);
       }
     }
+
+    if (sort) query = query.order(sort.col, { ascending: sort.asc });
 
     return query;
   }
@@ -101,14 +79,45 @@ export default class RestService {
     if (!this.objectname) {
       throw new Error("Object name is not set");
     }
-    return supabase.from(this.objectname).insert(data).select();
+    
+    console.log(`🔧 [RestService] Adding to ${this.objectname}:`, data);
+    
+    return supabase
+      .from(this.objectname)
+      .insert(data)
+      .select()
+      .then(result => {
+        if (result.error) {
+          console.error(`❌ [RestService] Insert error for ${this.objectname}:`, result.error);
+        } else {
+          console.log(`✅ [RestService] Successfully inserted to ${this.objectname}:`, result.data);
+        }
+        return result;
+      });
   }
+  
   update(id, data) {
     if (!this.objectname) {
       throw new Error("Object name is not set");
     }
-    return supabase.from(this.objectname).update(data).eq("id", id);
+    
+    console.log(`🔧 [RestService] Updating ${this.objectname} (${id}):`, data);
+    
+    return supabase
+      .from(this.objectname)
+      .update(data)
+      .eq("id", id)
+      .select()
+      .then(result => {
+        if (result.error) {
+          console.error(`❌ [RestService] Update error for ${this.objectname}:`, result.error);
+        } else {
+          console.log(`✅ [RestService] Successfully updated ${this.objectname}:`, result.data);
+        }
+        return result;
+      });
   }
+  
   delete(id) {
     if (!this.objectname) {
       throw new Error("Object name is not set");

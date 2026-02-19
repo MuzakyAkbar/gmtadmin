@@ -11,6 +11,14 @@ const columns = [
         isdisplayed: true,
     },
     {
+        field: 'category',
+        name: 'Category',
+        type: 'string',
+        required: false,
+        showintable: true,
+        isdisplayed: true,
+    },
+    {
         field: 'description',
         name: 'Description',
         type: 'string',

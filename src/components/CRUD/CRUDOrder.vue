@@ -52,25 +52,124 @@ const filteredData = computed(() => {
     return data.value?.filter(d => d.bo_venue_id === selectedVenue.value.id) || []
 })
 
-// Computed untuk total harga
-const calculatedGrandTotal = computed(() => {
+// Manual total override
+const manualTotal = ref(null)
+const isManualTotal = ref(false)
+
+// Additional charges (bo_booking_charge table)
+const svcCharge = new RestService('bo_booking_charge')
+const charges = ref([])           // charges yang sudah tersimpan di DB (saat edit)
+const tempCharges = ref([])       // charges baru yang belum tersimpan
+const chargeForm = ref({ keterangan: '', amount: null })
+const showChargeDialog = ref(false)
+const isEditingCharge = ref(false)
+const editingChargeId = ref(null)
+
+// Load existing charges saat edit
+const loadCharges = async (bookingId) => {
+    if (!bookingId) return
+    const res = await svcCharge.listwhere(0, 100, [
+        { field: 'bo_booking_id', op: 'eq', value: bookingId },
+        { field: 'isactive', op: 'eq', value: true }
+    ])
+    charges.value = res.data || []
+}
+
+// Semua charges (saved + temp) untuk display
+const allCharges = computed(() => [...charges.value, ...tempCharges.value])
+const totalCharges = computed(() => allCharges.value.reduce((s, c) => s + (c.amount || 0), 0))
+
+const openAddCharge = () => {
+    chargeForm.value = { keterangan: '', amount: null }
+    isEditingCharge.value = false
+    editingChargeId.value = null
+    showChargeDialog.value = true
+}
+
+const openEditCharge = (charge) => {
+    chargeForm.value = { keterangan: charge.keterangan, amount: charge.amount }
+    isEditingCharge.value = true
+    editingChargeId.value = charge.id || charge.temp_id
+    showChargeDialog.value = true
+}
+
+const saveCharge = () => {
+    if (!chargeForm.value.keterangan || !chargeForm.value.amount) {
+        toast.add({ severity: 'warn', summary: 'Warning', detail: 'Keterangan dan jumlah wajib diisi', life: 3000 })
+        return
+    }
+    if (isEditingCharge.value) {
+        // Update in temp or saved array
+        const tempIdx = tempCharges.value.findIndex(c => c.temp_id === editingChargeId.value)
+        if (tempIdx > -1) {
+            tempCharges.value[tempIdx] = { ...tempCharges.value[tempIdx], ...chargeForm.value }
+        } else {
+            const savedIdx = charges.value.findIndex(c => c.id === editingChargeId.value)
+            if (savedIdx > -1) charges.value[savedIdx] = { ...charges.value[savedIdx], ...chargeForm.value }
+        }
+    } else {
+        tempCharges.value.push({ temp_id: Date.now() + Math.random(), ...chargeForm.value })
+    }
+    showChargeDialog.value = false
+}
+
+const deleteCharge = (charge) => {
+    confirm.require({
+        message: 'Hapus biaya tambahan ini?',
+        header: 'Konfirmasi',
+        icon: 'pi pi-exclamation-triangle',
+        rejectProps: { label: 'Batal', severity: 'secondary', outlined: true },
+        acceptProps: { label: 'Hapus', severity: 'danger' },
+        accept: async () => {
+            if (charge.temp_id) {
+                tempCharges.value = tempCharges.value.filter(c => c.temp_id !== charge.temp_id)
+            } else if (charge.id) {
+                await svcCharge.delete(charge.id)
+                charges.value = charges.value.filter(c => c.id !== charge.id)
+                // Recalculate grandtotal after delete
+                form.value.grandtotal = calculatedGrandTotal.value
+                if (isupdating.value) {
+                    await svc.update(form.value.id, { grandtotal: form.value.grandtotal })
+                }
+                toast.add({ severity: 'success', summary: 'Dihapus', detail: 'Biaya tambahan dihapus', life: 2000 })
+            }
+        }
+    })
+}
+
+// Computed untuk total harga dari lines saja
+const linesTotalPrice = computed(() => {
     let total = 0;
-    
-    // Sum dari tempDataline
-    if (tempDataline.value && tempDataline.value.length > 0) {
-        total += tempDataline.value.reduce((sum, line) => sum + (line.price || 0), 0);
+    if (tempDataline.value) total += tempDataline.value.reduce((sum, l) => sum + (l.price || 0), 0);
+    if (tempJoggingLines.value) total += tempJoggingLines.value.reduce((sum, l) => sum + (l.price || 0), 0);
+    if (isupdating.value && dataline.value) {
+        total += dataline.value.reduce((sum, l) => sum + (l.price || 0), 0);
     }
-    
-    // Sum dari tempJoggingLines
-    if (tempJoggingLines.value && tempJoggingLines.value.length > 0) {
-        total += tempJoggingLines.value.reduce((sum, line) => sum + (line.price || 0), 0);
-    }
-    
     return total;
 });
 
-// Auto update grandtotal ketika lines berubah
-watch([tempDataline, tempJoggingLines], () => {
+// Grand total = base (lines atau manual) + all charges
+const calculatedGrandTotal = computed(() => {
+    const base = isManualTotal.value && manualTotal.value !== null ? manualTotal.value : linesTotalPrice.value;
+    return base + totalCharges.value;
+});
+
+const pricePerLine = computed(() => {
+    const totalLines = allDisplayLines.value.length;
+    if (!isManualTotal.value || !manualTotal.value || totalLines === 0) return null;
+    return Math.round(manualTotal.value / totalLines);
+});
+
+watch([manualTotal, isManualTotal], () => {
+    if (!isManualTotal.value || manualTotal.value === null) return;
+    const totalLines = allDisplayLines.value.length;
+    if (totalLines === 0) return;
+    const perLine = Math.round(manualTotal.value / totalLines);
+    tempDataline.value.forEach(l => { l.price = perLine });
+    tempJoggingLines.value.forEach(l => { l.price = perLine });
+});
+
+watch([tempDataline, tempJoggingLines, tempCharges, charges], () => {
     form.value.grandtotal = calculatedGrandTotal.value;
 }, { deep: true });
 
@@ -81,18 +180,27 @@ const loadExistingBookingsForDate = async (venueId, date) => {
     }
     try {
         const dateStr = new Date(date).toISOString().slice(0, 10)
-        const whereclause = [
+        // bo_bookingline tidak punya bo_venue_id, filter lewat bo_booking dulu
+        const bookingWhere = [
             { field: 'bo_venue_id', op: 'eq', value: venueId },
+            { field: 'isactive', op: 'eq', value: true }
+        ]
+        const bookingResult = await svc.listwhere(0, 500, bookingWhere)
+        const bookingIds = bookingResult.data ? bookingResult.data.map(b => b.id) : []
+        if (bookingIds.length === 0) {
+            existingBookings.value = []
+            return
+        }
+        const lineWhere = [
+            { field: 'bo_booking_id', op: 'in', value: bookingIds },
             { field: 'tanggal', op: 'eq', value: dateStr },
             { field: 'isactive', op: 'eq', value: true }
         ]
-        const result = await svcline.listwhere(0, 250, whereclause)
+        const result = await svcline.listwhere(0, 250, lineWhere)
         if (result.data && result.data.length > 0) {
-            const bookingIds = [...new Set(result.data.map(l => l.bo_booking_id))]
-            const bookings = await Promise.all(bookingIds.map(id => svc.getById(id)))
             existingBookings.value = result.data.map(line => {
-                const booking = bookings.find(b => b.data && b.data.id === line.bo_booking_id)
-                return { ...line, status: booking?.data?.status || 'UNKNOWN' }
+                const booking = bookingResult.data.find(b => b.id === line.bo_booking_id)
+                return { ...line, status: booking?.status || 'UNKNOWN' }
             })
         } else {
             existingBookings.value = []
@@ -104,11 +212,29 @@ const loadExistingBookingsForDate = async (venueId, date) => {
 }
 
 const loadVenues = async () => {
-    const result = await svcvenue.list(0, 100, { col: 'seqno', asc: { ascending: true } })
+    const result = await svcvenue.list(0, 100, [{ col: 'seqno', asc: true }])
     if (result.data) {
         venues.value = result.data.filter(v => v.isactive)
     }
 }
+
+// Computed: group venues by category
+const venuesByCategory = computed(() => {
+    const grouped = {}
+    venues.value.forEach(venue => {
+        const cat = venue.category || ''
+        if (!grouped[cat]) grouped[cat] = []
+        grouped[cat].push(venue)
+    })
+    // Sort: named categories first (alphabetically), uncategorized last
+    const entries = Object.entries(grouped)
+    entries.sort(([a], [b]) => {
+        if (!a && b) return 1
+        if (a && !b) return -1
+        return a.localeCompare(b)
+    })
+    return entries // [ [categoryName, [venues...]], ... ]
+})
 
 const onAdd = async ()=>{
     if (!selectedVenue.value) {
@@ -134,6 +260,10 @@ const onAdd = async ()=>{
     dataslot.value = {}
     tempDataline.value = [] 
     tempJoggingLines.value = []
+    tempCharges.value = []
+    charges.value = []
+    manualTotal.value = null
+    isManualTotal.value = false
     existingBookings.value = []
     
     isloading.value = false
@@ -228,7 +358,6 @@ const onSave = async ()=>{
             if(tempDataline.value.length > 0) {
                 let lineData = tempDataline.value.map(line => ({
                     bo_booking_id: form.value.id,
-                    bo_venue_id: form.value.bo_venue_id,
                     bo_slot_id: line.bo_slot_id,
                     tanggal: line.tanggal,
                     price: line.price,
@@ -251,7 +380,6 @@ const onSave = async ()=>{
                 
                 let joggingData = tempJoggingLines.value.map(line => ({
                     bo_booking_id: form.value.id,
-                    bo_venue_id: form.value.bo_venue_id,
                     bo_slot_id: line.bo_slot_id,
                     tanggal: line.tanggal,
                     jumlah_orang: line.jumlah_orang,
@@ -306,7 +434,6 @@ const onSave = async ()=>{
             if(tempDataline.value.length > 0) {
                 let lineData = tempDataline.value.map(line => ({
                     bo_booking_id: newBookingId,
-                    bo_venue_id: form.value.bo_venue_id,
                     bo_slot_id: line.bo_slot_id,
                     tanggal: line.tanggal,
                     price: line.price,
@@ -327,7 +454,6 @@ const onSave = async ()=>{
                 
                 let joggingData = tempJoggingLines.value.map(line => ({
                     bo_booking_id: newBookingId,
-                    bo_venue_id: form.value.bo_venue_id,
                     bo_slot_id: line.bo_slot_id,
                     tanggal: line.tanggal,
                     jumlah_orang: line.jumlah_orang,
@@ -344,7 +470,39 @@ const onSave = async ()=>{
                 }
             }
             
+            // Save new charges
+            if (tempCharges.value.length > 0) {
+                for (const charge of tempCharges.value) {
+                    await svcCharge.add({
+                        bo_booking_id: newBookingId,
+                        keterangan: charge.keterangan,
+                        amount: charge.amount,
+                        isactive: true
+                    })
+                }
+            }
+            
             toast.add({severity:'success',summary:'Success',detail:'Booking created successfully', life: 3000})
+        }
+        
+        // Save new charges on update too
+        if (isupdating.value && tempCharges.value.length > 0) {
+            for (const charge of tempCharges.value) {
+                await svcCharge.add({
+                    bo_booking_id: form.value.id,
+                    keterangan: charge.keterangan,
+                    amount: charge.amount,
+                    isactive: true
+                })
+            }
+        }
+        
+        // Update saved charges that were edited in-place
+        for (const charge of charges.value.filter(c => c.id)) {
+            await svcCharge.update(charge.id, {
+                keterangan: charge.keterangan,
+                amount: charge.amount
+            })
         }
         
         await onRefresh()
@@ -353,6 +511,10 @@ const onSave = async ()=>{
         form.value = {}
         tempDataline.value = []
         tempJoggingLines.value = []
+        tempCharges.value = []
+        charges.value = []
+        manualTotal.value = null
+        isManualTotal.value = false
         existingBookings.value = []
         
     } catch(err) {
@@ -399,8 +561,13 @@ const onEdit = item => {
     listview.value = false
     tempDataline.value = []
     tempJoggingLines.value = []
+    tempCharges.value = []
+    charges.value = []
+    manualTotal.value = null
+    isManualTotal.value = false
 
     fetchBookingLines(item.id)
+    loadCharges(item.id)
 }
 
 const fetchBookingLines = async (bookingId) => {
@@ -879,7 +1046,8 @@ const deleteLine = (line) => {
 
 const onRefresh = ()=>{
     isloading.value = true
-    svc.list(0,250,props.sortby).then(e=>{
+    const sortParam = Array.isArray(props.sortby) ? props.sortby : (props.sortby ? [props.sortby] : [{col:'created',asc:false}])
+    svc.list(0,250,sortParam).then(e=>{
         data.value = e.data
         isloading.value = false
     }).catch(err=>{
@@ -1069,49 +1237,107 @@ const linesByDate = computed(() => {
             <Button v-if="listview && !showVenueList" @click="exportCSV" icon="pi pi-download" variant="text"></Button>
             <Button v-if="listview && !showVenueList" @click="onRefresh" icon="pi pi-refresh" variant="text"></Button>
             <Button v-if="listview && !showVenueList" @click="onAdd" severity="primary" icon="pi pi-plus" :label="$t('Create Order')"></Button>
-            <Button v-if="!listview" @click="{listview=true;isupdating=false;form={};tempDataline=[];tempJoggingLines=[];existingBookings=[]}" :disabled="isloading" severity="secondary" :label="$t('Cancel')" variant="outlined"></Button>
+            <Button v-if="!listview" @click="{listview=true;isupdating=false;form={};tempDataline=[];tempJoggingLines=[];tempCharges=[];charges=[];existingBookings=[];manualTotal=null;isManualTotal=false}" :disabled="isloading" severity="secondary" :label="$t('Cancel')" variant="outlined"></Button>
             <Button v-if="!listview" @click="onSave" :disabled="isloading" severity="success" :label="$t('Save')"></Button>
         </div>
     </div>
     <div class="bg-white rounded">
         <!-- Venue Cards List -->
         <div v-if="listview && showVenueList" class="p-3 sm:p-6">
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                <div 
-                    v-for="venue in venues" 
-                    :key="venue.id"
-                    @click="selectedVenue = venue; showVenueList = false"
-                    class="bg-white border rounded-lg overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
-                >
-                    <img 
-                        v-if="venue.image1" 
-                        :src="venue.image1" 
-                        :alt="venue.name"
-                        class="w-full h-48 object-cover"
-                    />
-                    <div 
-                        v-else
-                        class="w-full h-48 bg-gradient-to-br from-blue-400 to-blue-600"
-                    ></div>
-                    <div class="p-4">
-                        <div class="flex justify-between items-start mb-2">
-                            <h3 class="font-semibold text-lg">{{ venue.name }}</h3>
-                            <span 
-                                v-if="venue.pricing_type"
-                                class="text-xs px-2 py-1 rounded"
-                                :class="venue.pricing_type === 'per_person' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'"
-                            >
-                                {{ venue.pricing_type === 'per_person' ? 'Per Person' : 'Per Slot' }}
-                            </span>
+            <div v-for="[category, categoryVenues] in venuesByCategory" :key="category" class="mb-8">
+                <!-- Category Header -->
+                <div v-if="category" class="flex items-center gap-3 mb-4">
+                    <h3 class="text-base font-bold text-gray-700 uppercase tracking-wide">{{ category }}</h3>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                    <span class="text-xs text-gray-400">{{ categoryVenues.length }} venue(s)</span>
+                </div>
+                <div v-else class="flex items-center gap-3 mb-4">
+                    <h3 class="text-base font-bold text-gray-400 uppercase tracking-wide">Other</h3>
+                    <div class="flex-1 h-px bg-gray-200"></div>
+                </div>
+
+                <!-- Venue Cards in this category -->
+                <!-- If category has multiple venues, show as courts (compact row) -->
+                <div v-if="category && categoryVenues.length > 1" class="flex flex-wrap gap-3">
+                    <div
+                        v-for="(venue, idx) in categoryVenues"
+                        :key="venue.id"
+                        @click="selectedVenue = venue; showVenueList = false"
+                        class="group relative overflow-hidden rounded-xl border hover:shadow-lg hover:border-blue-400 transition-all cursor-pointer flex-1"
+                        style="min-width:150px; max-width:220px"
+                    >
+                        <!-- Image / gradient -->
+                        <div class="relative w-full h-32">
+                            <img
+                                v-if="venue.image1"
+                                :src="venue.image1"
+                                :alt="venue.name"
+                                class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                            <div v-else class="w-full h-full bg-gradient-to-br from-blue-400 to-blue-600"></div>
+                            <div class="absolute inset-0 bg-black/30 group-hover:bg-black/20 transition-all"></div>
+                            <!-- Number badge -->
+                            <div class="absolute top-2 left-2 w-7 h-7 rounded-full bg-white/25 backdrop-blur-sm flex items-center justify-center">
+                                <span class="text-white font-bold text-sm">{{ idx + 1 }}</span>
+                            </div>
                         </div>
-                        <p class="text-gray-600 text-sm mt-1">{{ venue.description }}</p>
-                        <div class="flex justify-between items-center mt-3">
-                            <button class="text-blue-600 text-sm font-medium">
-                                View Orders →
-                            </button>
-                            <span class="text-xs px-2 py-1 rounded bg-green-100 text-green-800">
-                                {{ data?.filter(d => d.bo_venue_id === venue.id).length || 0 }} orders
-                            </span>
+                        <!-- Info -->
+                        <div class="p-3">
+                            <div class="font-semibold text-sm">{{ venue.name }}</div>
+                            <div class="flex items-center justify-between mt-2">
+                                <span
+                                    v-if="venue.pricing_type"
+                                    class="text-xs px-2 py-0.5 rounded"
+                                    :class="venue.pricing_type === 'per_person' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'"
+                                >
+                                    {{ venue.pricing_type === 'per_person' ? 'Per Person' : 'Per Slot' }}
+                                </span>
+                                <span class="text-xs px-2 py-0.5 rounded bg-green-100 text-green-800">
+                                    {{ data?.filter(d => d.bo_venue_id === venue.id).length || 0 }} orders
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Single venue or uncategorized: full card layout -->
+                <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div
+                        v-for="venue in categoryVenues"
+                        :key="venue.id"
+                        @click="selectedVenue = venue; showVenueList = false"
+                        class="bg-white border rounded-lg overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+                    >
+                        <img
+                            v-if="venue.image1"
+                            :src="venue.image1"
+                            :alt="venue.name"
+                            class="w-full h-48 object-cover"
+                        />
+                        <div
+                            v-else
+                            class="w-full h-48 bg-gradient-to-br from-blue-400 to-blue-600"
+                        ></div>
+                        <div class="p-4">
+                            <div class="flex justify-between items-start mb-2">
+                                <h3 class="font-semibold text-lg">{{ venue.name }}</h3>
+                                <span
+                                    v-if="venue.pricing_type"
+                                    class="text-xs px-2 py-1 rounded"
+                                    :class="venue.pricing_type === 'per_person' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'"
+                                >
+                                    {{ venue.pricing_type === 'per_person' ? 'Per Person' : 'Per Slot' }}
+                                </span>
+                            </div>
+                            <p class="text-gray-600 text-sm mt-1">{{ venue.description }}</p>
+                            <div class="flex justify-between items-center mt-3">
+                                <button class="text-blue-600 text-sm font-medium">
+                                    View Orders →
+                                </button>
+                                <span class="text-xs px-2 py-1 rounded bg-green-100 text-green-800">
+                                    {{ data?.filter(d => d.bo_venue_id === venue.id).length || 0 }} orders
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1150,8 +1376,8 @@ const linesByDate = computed(() => {
                 </Column>
                 <Column header="Action">
                     <template #body="slotProps">
-                        <Button v-if="props.canedit" icon="pi pi-pencil" @click="onEdit(slotProps.data)" severity="success" variant="text"></Button>
-                        <Button v-if="props.candelete" icon="pi pi-trash" @click="onDelete(slotProps.data)" severity="danger" variant="text"></Button>
+                        <Button icon="pi pi-pencil" @click="onEdit(slotProps.data)" severity="success" variant="text" v-tooltip="'Edit'"></Button>
+                        <Button v-if="props.candelete" icon="pi pi-trash" @click="onDelete(slotProps.data)" severity="danger" variant="text" v-tooltip="'Delete'"></Button>
                     </template>
                 </Column>
             </Table>
@@ -1204,7 +1430,7 @@ const linesByDate = computed(() => {
                 </div>
                 
                 <!-- Summary Card -->
-                <div class="p-4 mb-4 bg-blue-50 rounded-lg">
+                <div class="p-4 mb-4 bg-blue-50 rounded-lg space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <div class="text-sm text-gray-600">Total Lines</div>
@@ -1213,6 +1439,86 @@ const linesByDate = computed(() => {
                         <div class="text-right">
                             <div class="text-sm text-gray-600">Grand Total</div>
                             <div class="text-2xl font-bold text-green-600">{{ formatCurrency(calculatedGrandTotal) }}</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Manual Total Input -->
+                    <div class="border-t border-blue-200 pt-3">
+                        <div class="flex items-center gap-2 mb-2">
+                            <ToggleSwitch v-model="isManualTotal" inputId="manual_toggle" />
+                            <label for="manual_toggle" class="text-sm font-semibold text-gray-700 cursor-pointer">Input Total Harga Manual</label>
+                        </div>
+                        <div v-if="isManualTotal" class="space-y-1">
+                            <InputNumber 
+                                v-model="manualTotal" 
+                                mode="currency" 
+                                currency="IDR" 
+                                locale="id-ID" 
+                                class="w-full"
+                                placeholder="Masukkan total harga manual..."
+                            />
+                            <div v-if="pricePerLine !== null && allDisplayLines.length > 0" class="text-xs text-blue-600">
+                                = {{ formatCurrency(pricePerLine) }} × {{ allDisplayLines.length }} line(s)
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Additional Charges Table -->
+                    <div class="border-t border-blue-200 pt-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-semibold text-gray-700">Biaya Tambahan</span>
+                            <Button 
+                                icon="pi pi-plus" 
+                                label="Tambah" 
+                                size="small" 
+                                severity="warning" 
+                                variant="outlined"
+                                @click="openAddCharge"
+                            />
+                        </div>
+                        
+                        <div v-if="allCharges.length === 0" class="text-xs text-gray-400 italic py-1">
+                            Belum ada biaya tambahan
+                        </div>
+                        
+                        <div v-else class="rounded-lg border border-amber-200 overflow-hidden text-sm">
+                            <div 
+                                v-for="charge in allCharges" 
+                                :key="charge.id || charge.temp_id"
+                                class="flex items-center justify-between px-3 py-2 bg-amber-50 border-b border-amber-100 last:border-b-0"
+                            >
+                                <div class="flex items-center gap-2 flex-1 min-w-0">
+                                    <i class="pi pi-tag text-amber-500 shrink-0"></i>
+                                    <span class="text-gray-700 truncate">{{ charge.keterangan }}</span>
+                                    <Tag v-if="charge.temp_id" severity="warn" value="Belum disimpan" class="text-xs shrink-0" />
+                                </div>
+                                <div class="flex items-center gap-2 ml-2 shrink-0">
+                                    <span class="font-bold text-amber-700">+{{ formatCurrency(charge.amount) }}</span>
+                                    <Button icon="pi pi-pencil" size="small" severity="secondary" variant="text" @click="openEditCharge(charge)" />
+                                    <Button icon="pi pi-trash" size="small" severity="danger" variant="text" @click="deleteCharge(charge)" />
+                                </div>
+                            </div>
+                            <!-- Total charges row -->
+                            <div class="flex justify-between items-center px-3 py-2 bg-amber-100 font-bold text-sm border-t border-amber-200">
+                                <span class="text-amber-800">Total Biaya Tambahan</span>
+                                <span class="text-amber-700">+{{ formatCurrency(totalCharges) }}</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Grand total breakdown -->
+                        <div v-if="allCharges.length > 0" class="mt-2 px-3 py-2 bg-green-50 rounded-lg border border-green-200 text-sm">
+                            <div class="flex justify-between text-gray-600 mb-1">
+                                <span>Harga Slot</span>
+                                <span>{{ formatCurrency(linesTotalPrice) }}</span>
+                            </div>
+                            <div class="flex justify-between text-amber-700 mb-1">
+                                <span>Biaya Tambahan</span>
+                                <span>+{{ formatCurrency(totalCharges) }}</span>
+                            </div>
+                            <div class="flex justify-between font-bold text-green-700 pt-1 border-t border-green-200">
+                                <span>Grand Total</span>
+                                <span>{{ formatCurrency(calculatedGrandTotal) }}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1310,6 +1616,38 @@ const linesByDate = computed(() => {
                     </div>
                 </div>
             </div>
+
+            <!-- Add/Edit Charge Dialog -->
+            <Dialog v-model:visible="showChargeDialog" modal :header="isEditingCharge ? 'Edit Biaya Tambahan' : 'Tambah Biaya Tambahan'" :style="{ width: 'min(95vw, 28rem)' }">
+                <div class="flex flex-col gap-4 py-2">
+                    <div class="flex flex-col gap-1">
+                        <label class="text-sm font-semibold">Keterangan <span class="text-red">*</span></label>
+                        <InputText 
+                            v-model="chargeForm.keterangan" 
+                            placeholder="Contoh: Biaya peralatan, setup panggung, kebersihan..."
+                            class="w-full"
+                            autofocus
+                        />
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <label class="text-sm font-semibold">Jumlah (Rp) <span class="text-red">*</span></label>
+                        <InputNumber 
+                            v-model="chargeForm.amount" 
+                            mode="currency" 
+                            currency="IDR" 
+                            locale="id-ID" 
+                            class="w-full"
+                            placeholder="Masukkan jumlah..."
+                        />
+                    </div>
+                </div>
+                <template #footer>
+                    <div class="flex justify-between w-full">
+                        <Button label="Batal" severity="secondary" variant="outlined" @click="showChargeDialog = false" />
+                        <Button :label="isEditingCharge ? 'Simpan Perubahan' : 'Tambahkan'" icon="pi pi-check" @click="saveCharge" />
+                    </div>
+                </template>
+            </Dialog>
 
             <Dialog v-model:visible="showLineDialog" modal header="Add Booking Line" :style="{ width: 'min(95vw, 38rem)' }">
                 <div class="flex flex-col gap-4">
