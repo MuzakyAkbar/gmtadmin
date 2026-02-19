@@ -51,6 +51,34 @@ const columns = [
         isdisplayed: true,
     },
     {
+        field: 'bo_kategori_pendapatan_id',
+        name: 'Kategori Pendapatan',
+        type: 'options',
+        source: {
+            model: 'bo_kategori_pendapatan',
+            labelfield: 'name',
+        },
+        sortable: true,
+        required: false,
+        readonly: false,
+        showintable: true,
+        isdisplayed: true,
+    },
+    {
+        field: 'bo_kategori_olahraga_id',
+        name: 'Kategori Olahraga',
+        type: 'options',
+        source: {
+            model: 'bo_kategori_olahraga',
+            labelfield: 'name',
+        },
+        sortable: true,
+        required: false,
+        readonly: false,
+        showintable: true,
+        isdisplayed: true,
+    },
+    {
         field: 'grandtotal',
         name: 'Grand Total',
         type: 'currency',
@@ -89,7 +117,7 @@ const columns = [
         required: true,
         readonly: false,
         showintable: true,
-        isdisplayed: true, // CHANGED: dari false ke true
+        isdisplayed: true,
     },
     {
         field: 'created',
@@ -102,22 +130,19 @@ const columns = [
         readonly: true,
     },
 ]
-
 </script>
+
 <template>
-    <CRUDOrder 
-        entity="Booking" 
-        objectname="bo_booking" 
-        child1name="bo_bookingline" 
-        title="Bookings" 
-        :columns="columns" 
+    <CRUDOrder
+        entity="Booking"
+        objectname="bo_booking"
+        child1name="bo_bookingline"
+        title="Bookings"
+        :columns="columns"
         :canedit="true"
-        :candelete="false" 
-        :sortby="{col:'created', ascending:false}"
-    >
-    </CRUDOrder>
+        :candelete="false"
+        :sortby="[{col:'created', asc:false}]"
+    />
 </template>
 
-<style scoped>
-/* Add any custom styles if needed */
-</style>
+<style scoped></style>

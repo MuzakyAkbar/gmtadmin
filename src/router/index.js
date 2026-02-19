@@ -11,19 +11,21 @@ import Schedule from "../views/schedule/Schedule.vue";
 import Slot from "../views/slot/Slot.vue";
 import Price from "../views/price/Price.vue";
 import Referral from "../views/referral/Referral.vue";
+import KategoriPendapatan from "../views/master/KategoriPendapatan.vue";
+import KategoriOlahraga from "../views/master/KategoriOlahraga.vue";
 
 const routes = [
   {
     path: "/",
     name: "Dashboard",
     component: Dashboard,
-    meta: { layout: "DefaultLayout" }, // Use DefaultLayout
+    meta: { layout: "DefaultLayout" },
   },
   {
     path: "/login",
     name: "Login",
     component: Login,
-    meta: { layout: "AuthLayout" }, // Use AuthLayout
+    meta: { layout: "AuthLayout" },
   },
   {
     path: "/schedule",
@@ -79,6 +81,18 @@ const routes = [
     component: Referral,
     meta: { layout: "DefaultLayout" },
   },
+  {
+    path: "/master/kategori-pendapatan",
+    name: "Kategori Pendapatan",
+    component: KategoriPendapatan,
+    meta: { layout: "DefaultLayout" },
+  },
+  {
+    path: "/master/kategori-olahraga",
+    name: "Kategori Olahraga",
+    component: KategoriOlahraga,
+    meta: { layout: "DefaultLayout" },
+  },
 ];
 
 const router = createRouter({
@@ -95,7 +109,6 @@ router.beforeEach(async (to, from) => {
   if (s.isexpired) {
     loggedin = false;
   }
-  // console.log(loggedin);
 
   if (!loggedin && to.name !== "Login") {
     return { name: "Login" };

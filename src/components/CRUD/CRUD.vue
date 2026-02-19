@@ -120,9 +120,26 @@ onMounted(()=>{
 
     props.columns.forEach(d=>{
         if(d.type=='options'){
+            // Handle staticOptions tanpa fetch API
+            if(d.source.staticOptions) {
+                let opts = d.source.staticOptions
+                if (d.source.visibleOptions) {
+                    opts = opts.filter(o => d.source.visibleOptions.includes(o.id))
+                }
+                references.value[d.field] = opts
+                let xv = {}
+                d.source.staticOptions.forEach(e=>{
+                    xv = {...xv, [e.id]: e[d.source.labelfield]}
+                })
+                refvalue.value[d.field] = xv
+                return
+            }
+
+            // Guard: skip jika model tidak ada
+            if(!d.source.model) return
+
             const refsvc = new RestService(d.source.model)
-            refsvc.list().then(r=>{
-                // console.log(r);
+            refsvc.list(0, 1000).then(r=>{
                 if(r.data){
                     references.value[d.field] = r.data
                     let xv = {}
@@ -131,6 +148,8 @@ onMounted(()=>{
                     })
                     refvalue.value[d.field] = xv
                 }
+            }).catch(err=>{
+                console.error('Error loading options for', d.field, err)
             })
         }
     })
@@ -198,8 +217,8 @@ onMounted(()=>{
                 </div>
                 <div class="flex flex-wrap my-2">
                     <template v-for="col of props.columns">
-                        <div class="flex flex-col w-1/3 gap-2 pr-5 my-2">
-                        <template v-if="col.type=='string'">
+                        <div v-if="col.isdisplayed !== false" class="flex flex-col w-1/3 gap-2 pr-5 my-2">
+                        <template v-if="col.type=='string' || col.type=='text'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
                             <InputText :id="col.name" v-model="form[col.field]" :disabled="col.readonly" />
                         </template>
@@ -221,7 +240,7 @@ onMounted(()=>{
                         </template>
                         <template v-if="col.type=='options'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>
-                            <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly"></Dropdown>
+                            <Dropdown :id="col.name" v-model="form[col.field]" :options="references[col.field]" :optionLabel="col.source.labelfield" optionValue="id" :disabled="col.readonly" :filter="!col.source.staticOptions" filterPlaceholder="Search..."></Dropdown>
                         </template>
                         <template v-if="col.type=='select'">
                             <label :for="col.name">{{ col.name }} <span v-if="col.required" class="text-red">*</span></label>

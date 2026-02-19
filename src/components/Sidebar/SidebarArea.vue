@@ -73,6 +73,21 @@ const menuGroups = ref([
         route: '/referral',
       },
     ]
+  },
+  {
+    name: 'MASTER',
+    menuItems: [
+      {
+        icon: 'pi pi-wallet',
+        label: 'Kategori Pendapatan',
+        route: '/master/kategori-pendapatan',
+      },
+      {
+        icon: 'pi pi-flag',
+        label: 'Kategori Olahraga',
+        route: '/master/kategori-olahraga',
+      },
+    ]
   }
 ])
 </script>

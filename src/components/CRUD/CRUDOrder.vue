@@ -345,7 +345,9 @@ const onSave = async ()=>{
                 grandtotal: form.value.grandtotal,
                 original_total: form.value.original_total,
                 discount_amount: form.value.discount_amount,
-                status: form.value.status
+                status: form.value.status,
+                bo_kategori_pendapatan_id: form.value.bo_kategori_pendapatan_id || null,
+                bo_kategori_olahraga_id: form.value.bo_kategori_olahraga_id || null,
             })
             
             if(updateResult.error){
@@ -411,6 +413,8 @@ const onSave = async ()=>{
                 original_total: form.value.original_total,
                 discount_amount: form.value.discount_amount,
                 status: form.value.status,
+                bo_kategori_pendapatan_id: form.value.bo_kategori_pendapatan_id || null,
+                bo_kategori_olahraga_id: form.value.bo_kategori_olahraga_id || null,
                 isactive: true
             })
             
