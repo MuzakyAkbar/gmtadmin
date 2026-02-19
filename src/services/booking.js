@@ -41,7 +41,7 @@ export default class BookingService {
       .select(
         `
         id,
-        bo_slot (id,name,start_time,end_time),
+        bo_slot (id,start_time,end_time),
         amount,
         price_per_person,
         kapasitas,
@@ -128,7 +128,10 @@ export default class BookingService {
   // Get capacity info for per-person slots
   async getSlotCapacity(slot_id, tanggal) {
     // Query langsung untuk sum jumlah_orang dari bo_bookingline_jogging
-    const tanggalStr = tanggal instanceof Date ? tanggal.toISOString().split('T')[0] : tanggal;
+    // Gunakan local date string agar tidak shift timezone
+    const tanggalStr = tanggal instanceof Date
+        ? `${tanggal.getFullYear()}-${String(tanggal.getMonth()+1).padStart(2,'0')}-${String(tanggal.getDate()).padStart(2,'0')}`
+        : tanggal;
     
     const { data, error } = await supabase
       .from('bo_bookingline_jogging')
