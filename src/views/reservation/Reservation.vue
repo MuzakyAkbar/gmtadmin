@@ -164,22 +164,45 @@ const processScan = async (raw) => {
   stopDecoding()
 
   try {
-    // 1. Ekstrak UUID dari URL
-    let bookingId = raw.trim()
+    // 1. Ekstrak UUID / skey dari URL atau raw input
+    const rawTrimmed = raw.trim()
+    let bookingId = rawTrimmed
+
+    // Coba parse sebagai URL dulu
     try {
-      const url   = new URL(raw.trim())
+      const url   = new URL(rawTrimmed)
+      // Ambil segment terakhir dari pathname: /bookinginfo/{id} → id
       const parts = url.pathname.split('/').filter(Boolean)
-      bookingId   = parts[parts.length - 1]
-    } catch { /* bukan URL, pakai raw langsung */ }
+      const last  = parts[parts.length - 1]
+      if (last) bookingId = last
+    } catch {
+      // Bukan URL valid — gunakan raw sebagai-is (UUID atau skey)
+    }
+
+    // Bersihkan karakter non-visible yang mungkin terbawa copy-paste
+    bookingId = bookingId.replace(/[^\w\-\/]/g, '').trim()
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId)
     if (!isUUID) {
+      // Bukan UUID — coba cocokkan sebagai skey di data hari ini
       const bySkey = allBookings.value.find(b => b.skey === bookingId)
-      if (bySkey) bookingId = bySkey.id
-      else {
-        scanError.value  = `Format QR tidak dikenali: "${bookingId.slice(0, 40)}"`
-        scanResult.value = ''
-        return
+      if (bySkey) {
+        bookingId = bySkey.id
+      } else {
+        // Tidak ada di list hari ini — coba cari di DB berdasarkan skey
+        const { data: skeyData } = await supabase
+          .from('bo_booking')
+          .select('id, skey, bo_user(name)')
+          .eq('skey', bookingId)
+          .eq('status', 'CO')
+          .single()
+        if (skeyData) {
+          bookingId = skeyData.id
+        } else {
+          scanError.value  = `Booking tidak ditemukan: "${bookingId.slice(0, 40)}"`
+          scanResult.value = ''
+          return
+        }
       }
     }
 
@@ -202,13 +225,26 @@ const processScan = async (raw) => {
       }
       slotCount = todayLines.filter(l => !l.reservation).length
     } else {
-      // Booking tidak di list hari ini — fetch nama saja dari bo_booking
-      const { data: bData } = await supabase
+      // Booking tidak ada di list hari ini — fetch dari DB untuk validasi & nama
+      const { data: bData, error: bErr } = await supabase
         .from('bo_booking')
-        .select('bo_user(name)')
+        .select('id, skey, status, bo_user(name)')
         .eq('id', bookingId)
         .single()
-      customerName = bData?.bo_user?.name || 'Customer'
+
+      if (bErr || !bData) {
+        scanError.value  = 'Booking tidak ditemukan di database.'
+        scanResult.value = ''
+        return
+      }
+      if (bData.status !== 'CO') {
+        scanError.value  = `Booking #${bData.skey} belum lunas (status: ${bData.status})`
+        scanResult.value = ''
+        return
+      }
+      customerName = bData.bo_user?.name || 'Customer'
+      // Tidak ada slot di tanggal ini untuk booking tersebut
+      // Lanjutkan UPDATE — mungkin admin salah pilih tanggal, tapi tetap proses
     }
 
     // 3. Langsung UPDATE reservation = true by bo_booking_id + range tanggal
