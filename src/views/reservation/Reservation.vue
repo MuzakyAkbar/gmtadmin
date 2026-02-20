@@ -176,11 +176,17 @@ const processScan = async (raw) => {
       const last  = parts[parts.length - 1]
       if (last) bookingId = last
     } catch {
-      // Bukan URL valid — gunakan raw sebagai-is (UUID atau skey)
+      // Bukan URL valid — coba ekstrak segment terakhir secara manual
+      // (menangani kasus URL tanpa protokol atau sedikit typo)
+      const match = rawTrimmed.match(/\/([^\/\s?#]+)\s*$/)
+      if (match) bookingId = match[1]
+      // Jika tidak ada slash sama sekali, tetap pakai rawTrimmed as-is (UUID atau skey)
     }
 
     // Bersihkan karakter non-visible yang mungkin terbawa copy-paste
-    bookingId = bookingId.replace(/[^\w\-\/]/g, '').trim()
+    // PENTING: regex ini hanya dijalankan SETELAH ID diekstrak dari URL,
+    // bukan dari full URL (karena titik dua & titik pada "https://..." akan ikut terstrip)
+    bookingId = bookingId.replace(/[^\w\-]/g, '').trim()
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bookingId)
     if (!isUUID) {
