@@ -179,7 +179,6 @@ const processScan = async (raw) => {
       else {
         scanError.value  = `Format QR tidak dikenali: "${bookingId.slice(0, 40)}"`
         scanResult.value = ''
-        isProcessingScan.value = false
         return
       }
     }
@@ -199,7 +198,6 @@ const processScan = async (raw) => {
       if (alreadyAll) {
         scanResult.value = `✅ ${customerName} sudah check-in sebelumnya`
         scanError.value  = ''
-        isProcessingScan.value = false
         return
       }
       slotCount = todayLines.filter(l => !l.reservation).length
@@ -238,7 +236,6 @@ const processScan = async (raw) => {
       const msg = upRegular.error?.message || upJogging.error?.message || 'Unknown error'
       scanError.value  = 'Gagal update: ' + msg
       scanResult.value = ''
-      isProcessingScan.value = false
       return
     }
 
@@ -254,9 +251,9 @@ const processScan = async (raw) => {
   } catch (err) {
     scanError.value  = 'Error: ' + err.message
     scanResult.value = ''
+  } finally {
+    isProcessingScan.value = false
   }
-
-  isProcessingScan.value = false
 }
 
 // ── Kamera ─────────────────────────────────────────────────────
@@ -361,6 +358,18 @@ const stopDecoding = () => {
   if (scanInterval) { clearInterval(scanInterval); scanInterval = null }
 }
 
+const focusManualInput = () => {
+  // Delay singkat agar kamera sudah render dulu, lalu focus input
+  // Ini memunculkan keyboard Android otomatis tanpa perlu tap
+  setTimeout(() => {
+    const el = document.getElementById('manual-input')
+    if (el) {
+      const input = el.tagName === 'INPUT' ? el : el.querySelector('input')
+      input?.focus()
+    }
+  }, 600)
+}
+
 // ── Buka / Tutup Scanner ──────────────────────────────────────
 const openScanner = async () => {
   scanResult.value = ''
@@ -368,10 +377,10 @@ const openScanner = async () => {
   manualUrl.value  = ''
   isProcessingScan.value = false
   showScanner.value = true
-  // Tunggu DOM modal render, lalu start kamera
   await nextTick()
   await new Promise(r => setTimeout(r, 200))
   await startCamera()
+  focusManualInput()
 }
 
 const closeScanner = () => {
@@ -701,12 +710,15 @@ onUnmounted(() => {
 
             <!-- Input manual -->
             <div class="border-t border-gray-200 pt-3">
-              <p class="text-xs text-gray-500 mb-2 font-semibold">Input URL atau ID booking manual:</p>
+              <p class="text-xs text-gray-500 mb-2 font-semibold">Atau paste URL tiket manual:</p>
               <div class="flex gap-2">
                 <InputText
+                  id="manual-input"
                   v-model="manualUrl"
-                  placeholder="URL atau ID booking..."
+                  placeholder="https://booking.sck2.id/bookinginfo/..."
                   class="flex-1 text-sm"
+                  inputmode="url"
+                  autocomplete="off"
                   @keyup.enter="handleManualInput"
                 />
                 <Button icon="pi pi-check" severity="success" @click="handleManualInput" :disabled="!manualUrl.trim()" />
