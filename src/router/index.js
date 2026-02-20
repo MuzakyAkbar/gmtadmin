@@ -13,6 +13,7 @@ import Price from "../views/price/Price.vue";
 import Referral from "../views/referral/Referral.vue";
 import KategoriPendapatan from "../views/master/KategoriPendapatan.vue";
 import KategoriOlahraga from "../views/master/KategoriOlahraga.vue";
+import Reservation from "../views/reservation/Reservation.vue";
 
 const routes = [
   {
@@ -37,6 +38,12 @@ const routes = [
     path: "/booking",
     name: "Order",
     component: Booking,
+    meta: { layout: "DefaultLayout" },
+  },
+  {
+    path: "/reservation",
+    name: "Reservation",
+    component: Reservation,
     meta: { layout: "DefaultLayout" },
   },
   {

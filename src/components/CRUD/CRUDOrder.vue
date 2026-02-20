@@ -3,9 +3,11 @@ import { onMounted, ref, watch, computed } from 'vue';
 import { DatePicker, useToast, Dialog } from 'primevue';
 import { useConfirm } from 'primevue';
 import {useI18n} from 'vue-i18n';
-import {formatCurrency} from '../../composables/formater'
+import {formatCurrency, formatDateHuman} from '../../composables/formater'
 import RestService from '../../services/rest';
 import AdminBookingService from '../../services/AdminBookingService';
+import BookingService from '../../services/booking';
+import VueQrcode from 'vue-qrcode';
 
 const props = defineProps(['entity','objectname','child1name','title','columns','searchfield','details','sortby','candelete','canedit'])
 const i18n = useI18n()
@@ -18,6 +20,13 @@ const svcslot = new RestService('bo_slot');
 const svcpayment = new RestService('bo_payment');
 const svcvenue = new RestService('bo_venue');
 const adminBookingService = new AdminBookingService();
+const svcBooking = new BookingService();
+
+// Ticket dialog state
+const showTicketDialog = ref(false)
+const ticketData = ref(null)
+const isLoadingTicket = ref(false)
+const ticketBaseUrl = ref(window.location.origin)
 
 const listview = ref(true)
 const showVenueList = ref(true)
@@ -1048,6 +1057,61 @@ const deleteLine = (line) => {
     })
 }
 
+// ─── TICKET / QR CODE ───────────────────────────────────────────────────────
+
+const openTicket = async (item) => {
+    if (item.status !== 'CO') return
+    isLoadingTicket.value = true
+    showTicketDialog.value = true
+    ticketData.value = null
+
+    try {
+        const res = await svcBooking.getBooking(item.id)
+        if (res.data && res.data.length > 0) {
+            ticketData.value = res.data[0]
+        } else {
+            toast.add({ severity: 'error', summary: 'Error', detail: 'Booking tidak ditemukan', life: 3000 })
+            showTicketDialog.value = false
+        }
+    } catch (err) {
+        console.error(err)
+        toast.add({ severity: 'error', summary: 'Error', detail: 'Gagal memuat data tiket', life: 3000 })
+        showTicketDialog.value = false
+    } finally {
+        isLoadingTicket.value = false
+    }
+}
+
+const ticketQrValue = computed(() => {
+    if (!ticketData.value) return ''
+    return `${ticketBaseUrl.value}/bookinginfo/${ticketData.value.id}`
+})
+
+const groupTicketLinesByDate = (lines, joggingLines) => {
+    const acc = {}
+    if (lines) {
+        lines.forEach(line => {
+            const date = line.tanggal
+            if (!acc[date]) acc[date] = []
+            acc[date].push({ ...line, _type: 'regular' })
+        })
+    }
+    if (joggingLines) {
+        joggingLines.forEach(line => {
+            const date = line.tanggal
+            if (!acc[date]) acc[date] = []
+            acc[date].push({ ...line, _type: 'jogging' })
+        })
+    }
+    return Object.fromEntries(Object.entries(acc).sort(([a], [b]) => a.localeCompare(b)))
+}
+
+const onPrintTicket = () => {
+    window.print()
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+
 const onRefresh = ()=>{
     isloading.value = true
     const sortParam = Array.isArray(props.sortby) ? props.sortby : (props.sortby ? [props.sortby] : [{col:'created',asc:false}])
@@ -1380,6 +1444,14 @@ const linesByDate = computed(() => {
                 </Column>
                 <Column header="Action">
                     <template #body="slotProps">
+                        <Button 
+                            v-if="slotProps.data.status === 'CO'" 
+                            icon="pi pi-ticket" 
+                            @click="openTicket(slotProps.data)" 
+                            severity="warning" 
+                            variant="text" 
+                            v-tooltip="'Lihat Tiket / QR'"
+                        ></Button>
                         <Button icon="pi pi-pencil" @click="onEdit(slotProps.data)" severity="success" variant="text" v-tooltip="'Edit'"></Button>
                         <Button v-if="props.candelete" icon="pi pi-trash" @click="onDelete(slotProps.data)" severity="danger" variant="text" v-tooltip="'Delete'"></Button>
                     </template>
@@ -1770,4 +1842,217 @@ const linesByDate = computed(() => {
             </Dialog>
         </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         TICKET DIALOG — Lembar Booking + QR Code (Admin)
+         ═══════════════════════════════════════════════════════ -->
+    <Dialog 
+        v-model:visible="showTicketDialog" 
+        modal 
+        :header="ticketData ? `Tiket Booking — ${ticketData.skey || ticketData.id}` : 'Memuat Tiket...'"
+        :style="{ width: 'min(98vw, 680px)' }"
+        :pt="{ content: { class: 'p-0' } }"
+    >
+        <!-- Loading state -->
+        <div v-if="isLoadingTicket" class="flex flex-col items-center justify-center py-16 gap-4">
+            <i class="pi pi-spin pi-spinner text-4xl text-purple-600"></i>
+            <p class="text-gray-500 font-semibold">Memuat data tiket...</p>
+        </div>
+
+        <!-- Ticket content -->
+        <div v-else-if="ticketData" id="admin-ticket-content">
+            <!-- ── Header gradient ── -->
+            <div class="bg-gradient-to-r from-[#0A0E4F] via-[#5B21B6] to-[#7C3AED] p-6 text-white relative overflow-hidden">
+                <div class="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full -mr-20 -mt-20 pointer-events-none"></div>
+                <div class="absolute bottom-0 left-0 w-32 h-32 bg-white/10 rounded-full -ml-16 -mb-16 pointer-events-none"></div>
+                <div class="relative z-10 text-center">
+                    <div class="inline-block px-5 py-1.5 bg-[#FFC107] text-[#0A0E4F] rounded-full text-xs font-bold uppercase mb-3 tracking-wide">
+                        ✅ Booking Confirmed
+                    </div>
+                    <h2 class="text-2xl font-black uppercase mb-2">{{ ticketData.bo_venue?.name }}</h2>
+                    <div class="flex items-center justify-center gap-3 flex-wrap">
+                        <span class="font-mono font-bold text-lg tracking-wider"># {{ ticketData.skey || ticketData.id }}</span>
+                        <span class="px-3 py-1 bg-green-500 rounded-full text-xs font-bold">LUNAS</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-5 space-y-4">
+                <!-- ── Info Pemesan ── -->
+                <div class="bg-gray-50 rounded-xl p-4 space-y-3 border border-gray-200">
+                    <h3 class="font-bold text-[#0A0E4F] text-sm uppercase tracking-wide flex items-center gap-2">
+                        <i class="pi pi-user text-purple-600"></i> Info Pemesan
+                    </h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                        <div>
+                            <div class="text-gray-500 text-xs">Nama</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.bo_user?.name || '-' }}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">Email</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.bo_user?.email || '-' }}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">No. Telp</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.bo_user?.phone || '-' }}</div>
+                        </div>
+                        <div v-if="ticketData.bo_user?.companyname">
+                            <div class="text-gray-500 text-xs">Organisasi / Perusahaan</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.bo_user.companyname }}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">Tanggal Booking</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.bookingdate ? new Date(ticketData.bookingdate).toLocaleString('id-ID') : '-' }}</div>
+                        </div>
+                        <div>
+                            <div class="text-gray-500 text-xs">Dibuat</div>
+                            <div class="font-semibold text-gray-800">{{ ticketData.created ? new Date(ticketData.created).toLocaleString('id-ID') : '-' }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Detail Pesanan (per tanggal) ── -->
+                <div class="border border-gray-200 rounded-xl overflow-hidden">
+                    <div class="bg-[#0A0E4F] text-white px-4 py-2.5 flex items-center gap-2">
+                        <i class="pi pi-calendar text-[#FFC107]"></i>
+                        <span class="font-bold text-sm uppercase tracking-wide">Detail Pesanan</span>
+                        <span class="ml-auto text-xs bg-white/20 px-2 py-0.5 rounded-full">{{ ticketData.bo_venue?.name }}</span>
+                    </div>
+                    <div class="divide-y divide-gray-100">
+                        <div 
+                            v-for="(lines, date) in groupTicketLinesByDate(ticketData.bo_bookingline, ticketData.bo_bookingline_jogging)"
+                            :key="date"
+                            class="p-4"
+                        >
+                            <!-- Date header -->
+                            <div class="flex items-center gap-2 mb-3">
+                                <div class="w-2 h-2 rounded-full bg-purple-500"></div>
+                                <span class="font-bold text-[#0A0E4F] text-sm">
+                                    {{ new Date(date).toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) }}
+                                </span>
+                            </div>
+                            <!-- Slot badges -->
+                            <div class="flex flex-wrap gap-2">
+                                <div 
+                                    v-for="line in lines" 
+                                    :key="line.id || line.tanggal"
+                                    class="px-3 py-2 rounded-lg border-2 text-sm font-semibold"
+                                    :class="line._type === 'jogging' 
+                                        ? 'border-green-400 bg-green-50 text-green-800' 
+                                        : 'border-purple-400 bg-purple-50 text-purple-800'"
+                                >
+                                    <div class="flex items-center gap-1.5">
+                                        <i class="pi pi-clock text-xs"></i>
+                                        <span>{{ line.bo_slot?.start_time }} - {{ line.bo_slot?.end_time }}</span>
+                                    </div>
+                                    <div v-if="line._type === 'jogging'" class="text-xs mt-0.5 text-green-600 font-normal">
+                                        👥 {{ line.jumlah_orang }} org × Rp {{ formatCurrency(line.harga_per_orang) }}
+                                    </div>
+                                    <div class="text-xs mt-0.5 font-bold">
+                                        Rp {{ formatCurrency(line.price) }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Empty state -->
+                        <div v-if="!ticketData.bo_bookingline?.length && !ticketData.bo_bookingline_jogging?.length" class="p-8 text-center text-gray-400">
+                            <i class="pi pi-inbox text-3xl mb-2"></i>
+                            <p>Tidak ada booking line</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Referral / Diskon (jika ada) ── -->
+                <div 
+                    v-if="ticketData.discount_amount && ticketData.discount_amount > 0"
+                    class="bg-gradient-to-br from-green-50 to-emerald-50 border-2 border-green-300 rounded-xl p-4"
+                >
+                    <div class="flex items-center gap-2 mb-2">
+                        <i class="pi pi-tag text-green-600"></i>
+                        <span class="font-bold text-green-800 text-sm">Kode Referral / Diskon</span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div v-if="ticketData.original_total" class="flex justify-between col-span-2 text-gray-600">
+                            <span>Subtotal Asli</span>
+                            <span class="line-through">Rp {{ formatCurrency(ticketData.original_total) }}</span>
+                        </div>
+                        <div class="flex justify-between col-span-2 font-bold text-green-700 pt-1 border-t border-green-200">
+                            <span>Diskon</span>
+                            <span>-Rp {{ formatCurrency(ticketData.discount_amount) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Ringkasan Pembayaran ── -->
+                <div class="bg-gradient-to-r from-[#5B21B6] to-[#7C3AED] rounded-xl px-5 py-4 text-white flex items-center justify-between">
+                    <div>
+                        <div class="text-purple-200 text-xs uppercase font-bold tracking-wide">Total Pembayaran</div>
+                        <div class="text-3xl font-black mt-0.5">Rp {{ formatCurrency(ticketData.grandtotal) }}</div>
+                    </div>
+                    <div class="text-right text-xs text-purple-200 space-y-1">
+                        <div v-if="ticketData.bo_payment?.[0]?.status" class="flex items-center gap-1.5 justify-end">
+                            <i class="pi pi-check-circle text-green-300"></i>
+                            <span>{{ ticketData.bo_payment[0].status === 'CO' ? 'Lunas' : ticketData.bo_payment[0].status }}</span>
+                        </div>
+                        <div v-if="ticketData.bo_payment?.[0]?.created">
+                            {{ new Date(ticketData.bo_payment[0].created).toLocaleDateString('id-ID') }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── QR Code ── -->
+                <div class="bg-gradient-to-br from-[#FFC107]/20 to-[#FFD54F]/20 border-2 border-[#FFC107] rounded-2xl p-6 text-center">
+                    <div class="inline-block p-4 bg-white rounded-2xl shadow-xl mb-3">
+                        <VueQrcode :value="ticketQrValue" :options="{ width: 200, margin: 1 }"></VueQrcode>
+                    </div>
+                    <div class="text-xs text-gray-500 font-mono break-all mb-2 px-2">{{ ticketQrValue }}</div>
+                    <div class="flex items-center justify-center gap-2 text-[#0A0E4F] font-bold text-sm">
+                        <i class="pi pi-qrcode text-lg"></i>
+                        <span>Scan QR Code untuk verifikasi reservasi</span>
+                    </div>
+                </div>
+
+                <!-- ── Payment history ── -->
+                <div v-if="ticketData.bo_payment?.length" class="border border-gray-200 rounded-xl overflow-hidden">
+                    <div class="bg-gray-100 px-4 py-2 flex items-center gap-2">
+                        <i class="pi pi-credit-card text-gray-600"></i>
+                        <span class="font-bold text-sm text-gray-700">Riwayat Pembayaran</span>
+                    </div>
+                    <div class="divide-y divide-gray-100 text-sm">
+                        <div v-for="payment in ticketData.bo_payment" :key="payment.id" class="px-4 py-3 flex items-center justify-between">
+                            <div class="text-gray-600">{{ payment.created ? new Date(payment.created).toLocaleString('id-ID') : '-' }}</div>
+                            <Tag 
+                                :value="payment.status === 'CO' ? 'Lunas' : payment.status" 
+                                :severity="payment.status === 'CO' ? 'success' : 'warn'"
+                            ></Tag>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ticket dialog footer -->
+        <template #footer>
+            <div class="flex justify-between w-full">
+                <Button label="Tutup" severity="secondary" variant="outlined" @click="showTicketDialog = false" />
+                <Button label="Print / Download" icon="pi pi-print" severity="success" @click="onPrintTicket" />
+            </div>
+        </template>
+    </Dialog>
 </template>
+
+<style>
+@media print {
+    body * { visibility: hidden !important; }
+    #admin-ticket-content,
+    #admin-ticket-content * { visibility: visible !important; }
+    #admin-ticket-content {
+        position: fixed !important;
+        top: 0; left: 0;
+        width: 100%;
+        background: white !important;
+    }
+    .p-dialog-footer { display: none !important; }
+}
+@page { size: A4; margin: 10mm; }
+</style>

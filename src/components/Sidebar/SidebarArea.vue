@@ -38,6 +38,11 @@ const menuGroups = ref([
         route: '/booking',
       },
       {
+        icon: 'pi pi-id-card',
+        label: 'Reservasi',
+        route: '/reservation',
+      },
+      {
         icon: 'pi pi-dollar',
         label: 'Payment',
         route: '/payment',
