@@ -150,6 +150,38 @@
           </div>
         </div>
 
+        <!-- Batasan Hari -->
+        <div class="form-group">
+          <div class="checkbox-wrapper">
+            <input
+              v-model="hasDayRestriction"
+              type="checkbox"
+              id="has-day-restriction"
+            />
+            <label for="has-day-restriction">Batasi Hari Tertentu</label>
+          </div>
+        </div>
+
+        <div v-if="hasDayRestriction" class="form-group">
+          <label>Pilih Hari Berlaku</label>
+          <div class="day-picker">
+            <label
+              v-for="day in dayOptions"
+              :key="day.value"
+              :class="['day-chip', { selected: form.allowed_days.includes(day.value) }]"
+              @click="toggleDay(day.value)"
+            >
+              {{ day.label }}
+            </label>
+          </div>
+          <small v-if="form.allowed_days.length === 0" class="form-hint" style="color: #ef4444;">
+            Pilih minimal satu hari
+          </small>
+          <small v-else class="form-hint">
+            Aktif pada: {{ selectedDayNames }}
+          </small>
+        </div>
+
         <!-- Range Jam (Opsional) -->
         <div class="form-group">
           <div class="checkbox-wrapper">
@@ -234,7 +266,7 @@
           <button type="button" @click="$emit('close')" class="btn btn-cancel">
             Batal
           </button>
-          <button type="submit" :disabled="submitting" class="btn btn-submit">
+          <button type="submit" :disabled="submitting || (hasDayRestriction && form.allowed_days.length === 0)" class="btn btn-submit">
             <svg v-if="submitting" class="icon-sm spinner-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
             </svg>
@@ -262,6 +294,17 @@ const emit = defineEmits(["close", "success"]);
 const isEdit = computed(() => !!props.referral);
 const submitting = ref(false);
 const hasTimeRestriction = ref(false);
+const hasDayRestriction = ref(false);
+
+const dayOptions = [
+  { label: 'Min', fullLabel: 'Minggu', value: 0 },
+  { label: 'Sen', fullLabel: 'Senin', value: 1 },
+  { label: 'Sel', fullLabel: 'Selasa', value: 2 },
+  { label: 'Rab', fullLabel: 'Rabu', value: 3 },
+  { label: 'Kam', fullLabel: 'Kamis', value: 4 },
+  { label: 'Jum', fullLabel: "Jum'at", value: 5 },
+  { label: 'Sab', fullLabel: 'Sabtu', value: 6 },
+];
 
 const form = ref({
   code: "",
@@ -275,11 +318,27 @@ const form = ref({
   end_date: "",
   start_time: null,
   end_time: null,
+  allowed_days: [],
   max_usage: null,
   max_usage_per_user: 1,
   min_transaction: 0,
   isactive: true,
 });
+
+const selectedDayNames = computed(() => {
+  return form.value.allowed_days
+    .slice()
+    .sort((a, b) => a - b)
+    .map(v => dayOptions.find(d => d.value === v)?.fullLabel)
+    .filter(Boolean)
+    .join(', ');
+});
+
+function toggleDay(val) {
+  const idx = form.value.allowed_days.indexOf(val);
+  if (idx === -1) form.value.allowed_days.push(val);
+  else form.value.allowed_days.splice(idx, 1);
+}
 
 // Get current user from localStorage
 function getCurrentUser() {
@@ -296,15 +355,22 @@ function getCurrentUser() {
 
 // Populate form jika edit
 if (props.referral) {
+  const parsedDays = props.referral.allowed_days
+    ? props.referral.allowed_days.split(',').map(Number).filter(n => !isNaN(n))
+    : [];
+
   form.value = {
     ...props.referral,
     start_date: props.referral.start_date,
     end_date: props.referral.end_date,
+    allowed_days: parsedDays,
   };
   
   hasTimeRestriction.value = !!(
     props.referral.start_time && props.referral.end_time
   );
+
+  hasDayRestriction.value = parsedDays.length > 0;
 }
 
 // Clear time fields when time restriction is disabled
@@ -312,6 +378,13 @@ watch(hasTimeRestriction, (newValue) => {
   if (!newValue) {
     form.value.start_time = null;
     form.value.end_time = null;
+  }
+});
+
+// Clear allowed_days when day restriction is disabled
+watch(hasDayRestriction, (newValue) => {
+  if (!newValue) {
+    form.value.allowed_days = [];
   }
 });
 
@@ -348,6 +421,11 @@ async function handleSubmit() {
     }
   }
 
+  if (hasDayRestriction.value && form.value.allowed_days.length === 0) {
+    alert("Pilih minimal satu hari jika membatasi hari tertentu");
+    return;
+  }
+
   submitting.value = true;
 
   try {
@@ -366,22 +444,23 @@ async function handleSubmit() {
       end_date: form.value.end_date,
       start_time: hasTimeRestriction.value ? form.value.start_time : null,
       end_time: hasTimeRestriction.value ? form.value.end_time : null,
+      allowed_days: hasDayRestriction.value && form.value.allowed_days.length > 0
+        ? form.value.allowed_days.slice().sort((a, b) => a - b).join(',')
+        : null,
       max_usage: form.value.max_usage || null,
       max_usage_per_user: form.value.max_usage_per_user,
       min_transaction: form.value.min_transaction || 0,
       isactive: form.value.isactive,
       updated: timestamp,
-      updatedby: currentUser?.name || null, // Menggunakan name dari user
+      updatedby: currentUser?.name || null,
     };
 
     let result;
     if (isEdit.value) {
-      // Update
       result = await svc.update(props.referral.id, payload);
     } else {
-      // Insert
       payload.created = timestamp;
-      payload.createdby = currentUser?.name || null; // Menggunakan name dari user
+      payload.createdby = currentUser?.name || null;
       payload.current_usage = 0;
       result = await svc.add(payload);
     }
@@ -754,9 +833,47 @@ textarea.form-input {
   border-left: 3px solid #3b82f6;
 }
 
+/* Day Picker */
+.day-picker {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.day-chip {
+  padding: 0.5rem 0.9rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #64748b;
+  background: #f8fafc;
+  user-select: none;
+  transition: all 0.2s;
+}
+
+.day-chip:hover {
+  border-color: #93c5fd;
+  color: #3b82f6;
+  background: #eff6ff;
+}
+
+.day-chip.selected {
+  border-color: #3b82f6;
+  background: #3b82f6;
+  color: white;
+}
+
 @media (max-width: 480px) {
   .apply-options {
     grid-template-columns: 1fr;
+  }
+
+  .day-chip {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.8rem;
   }
 }
 </style>

@@ -74,6 +74,7 @@
               <th>Diskon</th>
               <th>Venue</th>
               <th>Periode</th>
+              <th>Hari</th>
               <th>Jam</th>
               <th>Penggunaan</th>
               <th>Min. Transaksi</th>
@@ -148,6 +149,18 @@
                     Expired
                   </span>
                 </div>
+              </td>
+
+              <!-- Hari -->
+              <td>
+                <span v-if="ref.allowed_days" class="days-chips">
+                  <span
+                    v-for="d in parseDays(ref.allowed_days)"
+                    :key="d.value"
+                    class="day-badge"
+                  >{{ d.label }}</span>
+                </span>
+                <span v-else class="all-time">Semua Hari</span>
               </td>
 
               <!-- Jam -->
@@ -233,7 +246,7 @@
 
             <!-- Empty State -->
             <tr v-if="filteredReferrals.length === 0">
-              <td colspan="9" class="empty-state">
+              <td colspan="10" class="empty-state">
                 <p>Tidak ada data kode referral</p>
               </td>
             </tr>
@@ -339,6 +352,20 @@
                 <span class="info-value">
                   {{ formatDate(ref.start_date) }} s/d {{ formatDate(ref.end_date) }}
                   <span v-if="isExpired(ref.end_date)" class="badge-expired">Expired</span>
+                </span>
+              </div>
+
+              <div class="info-row">
+                <span class="info-label">Hari:</span>
+                <span class="info-value">
+                  <span v-if="ref.allowed_days" class="days-chips">
+                    <span
+                      v-for="d in parseDays(ref.allowed_days)"
+                      :key="d.value"
+                      class="day-badge"
+                    >{{ d.label }}</span>
+                  </span>
+                  <span v-else class="all-time">Semua Hari</span>
                 </span>
               </div>
 
@@ -644,6 +671,22 @@ async function handleAutoDeactivate() {
   } finally {
     loading.value = false;
   }
+}
+
+const DAY_OPTIONS = [
+  { label: 'Min', fullLabel: 'Minggu', value: 0 },
+  { label: 'Sen', fullLabel: 'Senin', value: 1 },
+  { label: 'Sel', fullLabel: 'Selasa', value: 2 },
+  { label: 'Rab', fullLabel: 'Rabu', value: 3 },
+  { label: 'Kam', fullLabel: 'Kamis', value: 4 },
+  { label: 'Jum', fullLabel: "Jum'at", value: 5 },
+  { label: 'Sab', fullLabel: 'Sabtu', value: 6 },
+];
+
+function parseDays(allowedDays) {
+  if (!allowedDays) return [];
+  return allowedDays.split(',').map(Number).filter(n => !isNaN(n)).sort((a,b) => a-b)
+    .map(v => DAY_OPTIONS.find(d => d.value === v)).filter(Boolean);
 }
 
 function copyCode(code) {
@@ -1333,6 +1376,25 @@ function formatCurrency(value) {
   .mobile-view {
     display: block;
   }
+}
+
+/* Day badges */
+.days-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.day-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  background: #dbeafe;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* Discount apply-to badge */
