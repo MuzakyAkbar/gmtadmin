@@ -46,6 +46,22 @@
               <span v-else> Rp {{ formatCurrency(referral.discount_value) }} </span>
             </div>
           </div>
+
+          <div class="stat-card">
+            <div class="stat-label">Penerapan Diskon</div>
+            <div class="stat-value apply-value">
+              <span v-if="referral.discount_apply_to === 'per_slot'">
+                🎟️ Per Slot
+              </span>
+              <span v-else>
+                💰 Total
+              </span>
+            </div>
+            <div class="stat-sublabel">
+              <span v-if="referral.discount_apply_to === 'per_slot'">Dikalikan jumlah slot</span>
+              <span v-else>Dari total booking</span>
+            </div>
+          </div>
         </div>
 
         <!-- Loading State -->
@@ -71,6 +87,7 @@
                     <th>Tanggal</th>
                     <th>User</th>
                     <th>Booking ID</th>
+                    <th>Penerapan</th>
                     <th>Diskon Diberikan</th>
                   </tr>
                 </thead>
@@ -89,6 +106,11 @@
                     </td>
                     <td>
                       <code class="booking-id">{{ formatBookingId(usage.bo_booking_id) }}</code>
+                    </td>
+                    <td>
+                      <span class="apply-badge" :class="referral.discount_apply_to === 'per_slot' ? 'per-slot' : 'total'">
+                        {{ referral.discount_apply_to === 'per_slot' ? '🎟️ Per Slot' : '💰 Total' }}
+                      </span>
                     </td>
                     <td>
                       <span class="discount-amount">
@@ -128,6 +150,13 @@
                   <div class="info-row">
                     <span class="info-label">Booking ID:</span>
                     <code class="booking-id-mobile">{{ formatBookingId(usage.bo_booking_id) }}</code>
+                  </div>
+
+                  <div class="info-row">
+                    <span class="info-label">Penerapan:</span>
+                    <span class="apply-badge" :class="referral.discount_apply_to === 'per_slot' ? 'per-slot' : 'total'">
+                      {{ referral.discount_apply_to === 'per_slot' ? '🎟️ Per Slot' : '💰 Total' }}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -344,7 +373,7 @@ function formatBookingId(id) {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr); /* 4 kolom equal width */
+  grid-template-columns: repeat(5, 1fr); /* 5 kolom: +penerapan */
   gap: 1rem;
   margin-bottom: 2rem;
 }
@@ -367,6 +396,20 @@ function formatBookingId(id) {
 
 .stat-card:nth-child(4) {
   background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+.stat-card:nth-child(5) {
+  background: linear-gradient(135deg, #fa8231 0%, #f7b731 100%);
+}
+
+.stat-sublabel {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  margin-top: 0.25rem;
+}
+
+.apply-value {
+  font-size: 1.4rem;
 }
 
 .stat-label {
@@ -507,6 +550,24 @@ function formatBookingId(id) {
   font-size: 1rem;
 }
 
+.apply-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.apply-badge.per-slot {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.apply-badge.total {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
 /* Mobile Card View */
 .usage-card {
   background: white;
@@ -587,11 +648,8 @@ function formatBookingId(id) {
   }
 
   .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
-}
-
-@media (max-width: 768px) {
   .modal-overlay {
     padding: 0;
     align-items: flex-end;

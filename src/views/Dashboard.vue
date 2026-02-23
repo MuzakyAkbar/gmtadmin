@@ -31,6 +31,7 @@
                     <div class="card-sub">
                         <span class="badge-co">CO {{ summary.statusCount.CO || 0 }}</span>
                         <span class="badge-wp">WP {{ summary.statusCount.WP || 0 }}</span>
+                        <span class="badge-mt">MT {{ summary.statusCount.MT || 0 }}</span>
                         <span class="badge-cl">CL {{ summary.statusCount.CL || 0 }}</span>
                     </div>
                 </div>
@@ -152,6 +153,7 @@
                                 class="cal-cell"
                                 :class="getCellClass(slot.id, day.dateStr)"
                                 :title="getCellTooltip(slot.id, day.dateStr)"
+                                @click="openCellDetail(slot.id, day.dateStr)"
                             >
                                 <span class="cell-status-icon">{{ getCellIcon(slot.id, day.dateStr) }}</span>
                             </div>
@@ -161,6 +163,157 @@
             </div>
         </div>
     </div>
+
+    <!-- Cell Detail Modal -->
+    <transition name="modal-fade">
+        <div v-if="cellDetail.show" class="modal-overlay" @click.self="cellDetail.show = false">
+            <div class="modal-card">
+                <div class="modal-header">
+                    <div class="modal-title-group">
+                        <span class="modal-status-badge" :class="`mbadge-${cellDetail.status?.toLowerCase()}`">
+                            {{ cellDetail.status }}
+                        </span>
+                        <h3 class="modal-title">{{ cellDetail.slotName }}</h3>
+                    </div>
+                    <button class="modal-close" @click="cellDetail.show = false">✕</button>
+                </div>
+                <div class="modal-date-info">
+                    <span class="modal-date-icon">📅</span>
+                    <span>{{ cellDetail.dateLabel }}</span>
+                </div>
+
+                <!-- CO Detail -->
+                <div v-if="cellDetail.status === 'CO'" class="modal-body">
+                    <div v-for="entry in cellDetail.entries" :key="entry.bo_booking_id" class="detail-entry">
+                        <div class="detail-row">
+                            <span class="detail-icon">🎫</span>
+                            <span class="detail-label">ID Booking</span>
+                            <span class="detail-value detail-mono" style="font-size:0.7rem">{{ entry.bo_booking_id || '-' }}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-icon">👤</span>
+                            <span class="detail-label">Customer</span>
+                            <span class="detail-value">{{ entry.customer_name || '-' }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_phone">
+                            <span class="detail-icon">📱</span>
+                            <span class="detail-label">Telepon</span>
+                            <span class="detail-value detail-mono">{{ entry.customer_phone }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_email">
+                            <span class="detail-icon">✉️</span>
+                            <span class="detail-label">Email</span>
+                            <span class="detail-value">{{ entry.customer_email }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_company">
+                            <span class="detail-icon">🏢</span>
+                            <span class="detail-label">Perusahaan</span>
+                            <span class="detail-value">{{ entry.customer_company }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.price">
+                            <span class="detail-icon">🎟️</span>
+                            <span class="detail-label">Harga Slot</span>
+                            <span class="detail-value detail-green">{{ formatCurrency(entry.price) }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.grandtotal">
+                            <span class="detail-icon">💰</span>
+                            <span class="detail-label">Total Booking</span>
+                            <span class="detail-value detail-green" style="font-weight:800">{{ formatCurrency(entry.grandtotal) }}</span>
+                        </div>
+                        <div v-if="cellDetail.entries.length > 1" class="detail-divider"></div>
+                    </div>
+                </div>
+
+                <!-- MT Detail -->
+                <div v-else-if="cellDetail.status === 'MT'" class="modal-body">
+                    <div class="mt-banner">
+                        <span class="mt-icon">🔧</span>
+                        <div>
+                            <div class="mt-title">Jadwal Maintenance</div>
+                            <div class="mt-sub">Slot tidak tersedia untuk booking</div>
+                        </div>
+                    </div>
+                    <div v-for="entry in cellDetail.entries" :key="entry.bo_booking_id" class="detail-entry">
+                        <div class="detail-row" v-if="entry.bo_booking_id">
+                            <span class="detail-icon">🎫</span>
+                            <span class="detail-label">ID Booking</span>
+                            <span class="detail-value detail-mono" style="font-size:0.7rem">{{ entry.bo_booking_id }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_name">
+                            <span class="detail-icon">👤</span>
+                            <span class="detail-label">PIC</span>
+                            <span class="detail-value">{{ entry.customer_name }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_phone">
+                            <span class="detail-icon">📱</span>
+                            <span class="detail-label">Telepon</span>
+                            <span class="detail-value detail-mono">{{ entry.customer_phone }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.notes">
+                            <span class="detail-icon">📝</span>
+                            <span class="detail-label">Keterangan</span>
+                            <span class="detail-value">{{ entry.notes }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WP Detail -->
+                <div v-else-if="cellDetail.status === 'WP'" class="modal-body">
+                    <div v-for="entry in cellDetail.entries" :key="entry.bo_booking_id" class="detail-entry">
+                        <div class="detail-row">
+                            <span class="detail-icon">⏳</span>
+                            <span class="detail-label">Status</span>
+                            <span class="detail-value" style="color:#d97706;font-weight:700">Menunggu Pembayaran</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-icon">🎫</span>
+                            <span class="detail-label">ID Booking</span>
+                            <span class="detail-value detail-mono" style="font-size:0.7rem">{{ entry.bo_booking_id || '-' }}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-icon">👤</span>
+                            <span class="detail-label">Customer</span>
+                            <span class="detail-value">{{ entry.customer_name || '-' }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_phone">
+                            <span class="detail-icon">📱</span>
+                            <span class="detail-label">Telepon</span>
+                            <span class="detail-value detail-mono">{{ entry.customer_phone }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_email">
+                            <span class="detail-icon">✉️</span>
+                            <span class="detail-label">Email</span>
+                            <span class="detail-value">{{ entry.customer_email }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.customer_company">
+                            <span class="detail-icon">🏢</span>
+                            <span class="detail-label">Perusahaan</span>
+                            <span class="detail-value">{{ entry.customer_company }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.price">
+                            <span class="detail-icon">🎟️</span>
+                            <span class="detail-label">Harga Slot</span>
+                            <span class="detail-value">{{ formatCurrency(entry.price) }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.jumlah_orang">
+                            <span class="detail-icon">👥</span>
+                            <span class="detail-label">Jumlah Orang</span>
+                            <span class="detail-value">{{ entry.jumlah_orang }} orang × {{ formatCurrency(entry.harga_per_orang) }}</span>
+                        </div>
+                        <div class="detail-row" v-if="entry.grandtotal">
+                            <span class="detail-icon">💰</span>
+                            <span class="detail-label">Total Booking</span>
+                            <span class="detail-value" style="font-weight:800">{{ formatCurrency(entry.grandtotal) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button class="modal-btn-close" @click="cellDetail.show = false">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </transition>
 </template>
 
 <script setup>
@@ -180,6 +333,15 @@ const venues         = ref([])
 const selectedVenueId = ref(null)
 const venueSlots     = ref([])
 const calendarBookings = ref([]) // bookinglines for selected venue+month
+
+// ── Cell Detail Modal State ───────────────────────────────────
+const cellDetail = ref({
+    show: false,
+    slotName: '',
+    dateLabel: '',
+    status: null,
+    entries: []
+})
 
 // Charts refs
 const revenueChartRef = ref(null)
@@ -316,6 +478,27 @@ function getCellTooltip(slotId, dateStr) {
     return entries.map(e => `${e.status}`).join(', ')
 }
 
+function openCellDetail(slotId, dateStr) {
+    const entries = bookingMap.value[`${slotId}-${dateStr}`]
+    if (!entries || entries.length === 0) return
+
+    const status = getCellStatus(slotId, dateStr)
+    if (!['CO', 'MT', 'WP'].includes(status)) return
+
+    const slot = venueSlots.value.find(s => s.id === slotId)
+    const dateObj = new Date(dateStr + 'T00:00:00')
+    const dayShort = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']
+    const dateLabel = `${dayShort[dateObj.getDay()]}, ${dateObj.getDate()} ${monthNames[dateObj.getMonth()]} ${dateObj.getFullYear()}`
+
+    cellDetail.value = {
+        show: true,
+        slotName: slot ? `${slot.name} (${slot.start_time?.slice(0,5)}–${slot.end_time?.slice(0,5)})` : `Slot`,
+        dateLabel,
+        status,
+        entries: entries.filter(e => e.status === status)
+    }
+}
+
 // ── Load Functions ────────────────────────────────────────────
 async function loadVenues() {
     const res = await svcVenue.list(0, 100, [{ col: 'seqno', asc: true }])
@@ -347,23 +530,95 @@ async function loadSlotsForVenue(venueId) {
 }
 
 async function loadCalendarBookings(venueId) {
-    // RPC untuk bo_bookingline
-    const { data: rpcData } = await supabase.rpc('getBookingSchedules', { venue_id: venueId })
-
-    // Query langsung untuk bo_bookingline_jogging
-    const { data: joggingData } = await supabase
-        .from('bo_bookingline_jogging')
-        .select('tanggal, bo_slot_id, bo_booking!inner(status)')
-        .eq('bo_venue_id', venueId)
+    // ── Tiru persis listSchedules di booking.js (customer) ──
+    // Step 1: bo_bookingline via embed filter bo_booking!inner
+    const { data: regularData } = await supabase
+        .from('bo_bookingline')
+        .select(`
+            tanggal,
+            bo_slot_id,
+            price,
+            bo_booking!inner(status, id, bo_venue_id)
+        `)
+        .eq('bo_booking.bo_venue_id', venueId)
+        .in('bo_booking.status', ['WP', 'CO', 'MT'])
         .eq('isactive', true)
 
-    const joggingTransformed = (joggingData || []).map(item => ({
-        tanggal: item.tanggal,
-        bo_slot_id: item.bo_slot_id,
-        status: item.bo_booking.status,
-    }))
+    // Step 2: bo_bookingline_jogging via embed filter bo_booking!inner
+    const { data: joggingData } = await supabase
+        .from('bo_bookingline_jogging')
+        .select(`
+            tanggal,
+            bo_slot_id,
+            price,
+            jumlah_orang,
+            harga_per_orang,
+            bo_booking!inner(status, id)
+        `)
+        .eq('bo_venue_id', venueId)
+        .in('bo_booking.status', ['WP', 'CO', 'MT'])
+        .eq('isactive', true)
 
-    calendarBookings.value = [...(rpcData || []), ...joggingTransformed]
+    // Kumpulkan semua booking IDs unik dari kedua query
+    const allBookingIds = []
+    ;(regularData || []).forEach(r => { if (r.bo_booking?.id) allBookingIds.push(r.bo_booking.id) })
+    ;(joggingData || []).forEach(r => { if (r.bo_booking?.id) allBookingIds.push(r.bo_booking.id) })
+    const uniqueBookingIds = [...new Set(allBookingIds)]
+
+    // Step 3: Fetch hanya field yang PASTI ada di bo_booking admin project
+    // (booking_no & notes tidak ada di schema admin - hanya pakai field yang terbukti dari CRUDOrder)
+    const bookingLookup = {}
+    if (uniqueBookingIds.length > 0) {
+        const { data: bookingDetails, error: bookingErr } = await supabase
+            .from('bo_booking')
+            .select('id, grandtotal, bo_user_id')
+            .in('id', uniqueBookingIds)
+
+        if (bookingErr) console.warn('bo_booking fetch error:', bookingErr)
+
+        // Step 4: Fetch bo_user terpisah pakai bo_user_id yang didapat
+        const userIds = [...new Set((bookingDetails || []).map(b => b.bo_user_id).filter(Boolean))]
+        const userLookup = {}
+        if (userIds.length > 0) {
+            const { data: users, error: userErr } = await supabase
+                .from('bo_user')
+                .select('id, name, email, phone, companyname')
+                .in('id', userIds)
+            if (userErr) console.warn('bo_user fetch error:', userErr)
+            ;(users || []).forEach(u => { userLookup[u.id] = u })
+        }
+
+        ;(bookingDetails || []).forEach(b => {
+            bookingLookup[b.id] = {
+                ...b,
+                bo_user: userLookup[b.bo_user_id] || null
+            }
+        })
+    }
+
+    // Helper: transform line + inject customer detail
+    function transform(lines) {
+        return (lines || []).map(line => {
+            const bookingId = line.bo_booking?.id
+            const b = bookingLookup[bookingId] || {}
+            return {
+                tanggal:          line.tanggal,
+                bo_slot_id:       line.bo_slot_id,
+                bo_booking_id:    bookingId,
+                status:           line.bo_booking?.status  || null,
+                price:            line.price               || null,
+                jumlah_orang:     line.jumlah_orang        || null,
+                harga_per_orang:  line.harga_per_orang     || null,
+                grandtotal:       b.grandtotal             || null,
+                customer_name:    b.bo_user?.name          || null,
+                customer_email:   b.bo_user?.email         || null,
+                customer_phone:   b.bo_user?.phone         || null,
+                customer_company: b.bo_user?.companyname   || null,
+            }
+        })
+    }
+
+    calendarBookings.value = [...transform(regularData), ...transform(joggingData)]
 }
 
 async function loadSummary() {
@@ -673,7 +928,156 @@ onMounted(async () => {
 
 .badge-co { background: #dcfce7; color: #16a34a; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-size: 0.7rem; }
 .badge-wp { background: #fef9c3; color: #ca8a04; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-size: 0.7rem; }
+.badge-mt { background: #e0e7ff; color: #4338ca; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-size: 0.7rem; }
 .badge-cl { background: #fee2e2; color: #dc2626; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-size: 0.7rem; }
+
+/* ── Cell Detail Modal ── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 999;
+    padding: 1rem;
+    backdrop-filter: blur(2px);
+}
+.modal-card {
+    background: #fff;
+    border-radius: 16px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+.modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 1.25rem 1.35rem 0.75rem;
+    border-bottom: 1px solid #f0f0f0;
+}
+.modal-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.modal-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 0;
+    color: #1a1d23;
+}
+.modal-close {
+    background: #f3f4f6;
+    border: none;
+    border-radius: 8px;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 0.75rem;
+    color: #6b7280;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.modal-close:hover { background: #e5e7eb; }
+.modal-status-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    width: fit-content;
+}
+.mbadge-co { background: #d1fae5; color: #059669; }
+.mbadge-wp { background: #fef3c7; color: #d97706; }
+.mbadge-mt { background: #e0e7ff; color: #4338ca; }
+.mbadge-cl { background: #fee2e2; color: #dc2626; }
+
+.modal-date-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.35rem;
+    background: #f8fafc;
+    font-size: 0.82rem;
+    color: #6b7280;
+    font-weight: 600;
+    border-bottom: 1px solid #f0f0f0;
+}
+.modal-date-icon { font-size: 0.85rem; }
+
+.modal-body {
+    padding: 1rem 1.35rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+.detail-entry { display: flex; flex-direction: column; gap: 0.5rem; }
+.detail-divider { border-top: 1px dashed #e5e7eb; margin: 0.5rem 0; }
+.detail-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.45rem 0.6rem;
+    background: #f8fafc;
+    border-radius: 8px;
+}
+.detail-icon { font-size: 0.85rem; flex-shrink: 0; }
+.detail-label { font-size: 0.75rem; color: #9ca3af; font-weight: 600; width: 90px; flex-shrink: 0; }
+.detail-value { font-size: 0.83rem; font-weight: 700; color: #1a1d23; flex: 1; }
+.detail-mono { font-family: 'JetBrains Mono', monospace; }
+.detail-green { color: #16a34a; }
+
+.mt-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: #eef2ff;
+    border-radius: 10px;
+    margin-bottom: 0.75rem;
+}
+.mt-icon { font-size: 1.5rem; }
+.mt-title { font-size: 0.88rem; font-weight: 700; color: #4338ca; }
+.mt-sub { font-size: 0.75rem; color: #6366f1; margin-top: 0.1rem; }
+
+.modal-footer {
+    padding: 0.85rem 1.35rem;
+    border-top: 1px solid #f0f0f0;
+    display: flex;
+    justify-content: flex-end;
+}
+.modal-btn-close {
+    padding: 0.45rem 1.25rem;
+    background: #6366f1;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 0.83rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.modal-btn-close:hover { background: #4f46e5; }
+
+/* Modal Transition */
+.modal-fade-enter-active,
+.modal-fade-leave-active { transition: opacity 0.2s ease; }
+.modal-fade-enter-from,
+.modal-fade-leave-to { opacity: 0; }
+.modal-fade-enter-active .modal-card,
+.modal-fade-leave-active .modal-card { transition: transform 0.2s ease; }
+.modal-fade-enter-from .modal-card { transform: scale(0.95) translateY(10px); }
+.modal-fade-leave-to .modal-card { transform: scale(0.95) translateY(10px); }
 
 /* ── Charts Row ── */
 .charts-row {
@@ -824,9 +1228,9 @@ onMounted(async () => {
 .cal-cell:hover { filter: brightness(0.93); }
 
 .cell-empty { background: #fff; color: transparent; }
-.cell-co    { background: #d1fae5; color: #059669; }
-.cell-wp    { background: #fef3c7; color: #d97706; }
-.cell-mt    { background: #e0e7ff; color: #4338ca; }
+.cell-co    { background: #d1fae5; color: #059669; cursor: pointer; }
+.cell-wp    { background: #fef3c7; color: #d97706; cursor: pointer; }
+.cell-mt    { background: #e0e7ff; color: #4338ca; cursor: pointer; }
 .cell-cl    { background: #fee2e2; color: #dc2626; }
 
 .cell-status-icon { font-size: 0.7rem; }

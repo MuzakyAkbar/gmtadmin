@@ -99,7 +99,7 @@ const menuGroups = ref([
 
 <template>
   <aside
-    class="absolute left-0 top-0 z-9999 flex h-screen flex-col overflow-y-hidden bg-gmt1 duration-300 ease-linear dark:bg-boxdark lg:static lg:translate-x-0 transition-all"
+    class="absolute left-0 top-0 z-40 flex h-screen flex-col overflow-y-hidden bg-gmt1 duration-300 ease-linear dark:bg-boxdark lg:static lg:translate-x-0 transition-all"
     :class="{
       'translate-x-0': sidebarStore.isSidebarOpen,
       '-translate-x-full': !sidebarStore.isSidebarOpen,
@@ -140,7 +140,7 @@ const menuGroups = ref([
     <!-- Toggle Collapse Button (Desktop only) -->
     <button 
       @click="toggleCollapse"
-      class="hidden lg:flex absolute -right-3.5 top-24 bg-white dark:bg-boxdark text-gmt1 dark:text-white rounded-full p-2 shadow-lg hover:shadow-xl border-2 border-gmt1 dark:border-white transition-all z-50 items-center justify-center"
+      class="hidden lg:flex absolute -right-3.5 top-24 bg-white dark:bg-boxdark text-gmt1 dark:text-white rounded-full p-2 shadow-lg hover:shadow-xl border-2 border-gmt1 dark:border-white transition-all z-41 items-center justify-center"
       :title="isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'"
     >
       <svg 
@@ -193,6 +193,6 @@ aside {
 
 /* Ensure toggle button is always visible and clickable */
 button[title*="Sidebar"] {
-  z-index: 9999;
+  z-index: 41;
 }
 </style>

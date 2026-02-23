@@ -77,6 +77,44 @@
           <small class="form-hint">Batasi jumlah maksimal diskon untuk persentase</small>
         </div>
 
+        <!-- Penerapan Diskon -->
+        <div class="form-group">
+          <label class="required">Penerapan Diskon</label>
+          <div class="apply-options">
+            <label
+              :class="['apply-option', { selected: form.discount_apply_to === 'total' }]"
+              @click="form.discount_apply_to = 'total'"
+            >
+              <input type="radio" v-model="form.discount_apply_to" value="total" style="display:none" />
+              <span class="apply-icon">💰</span>
+              <span class="apply-label-text">
+                <strong>Total Booking</strong>
+                <small>Diskon dari total keseluruhan booking</small>
+              </span>
+            </label>
+            <label
+              :class="['apply-option', { selected: form.discount_apply_to === 'per_slot' }]"
+              @click="form.discount_apply_to = 'per_slot'"
+            >
+              <input type="radio" v-model="form.discount_apply_to" value="per_slot" style="display:none" />
+              <span class="apply-icon">🎟️</span>
+              <span class="apply-label-text">
+                <strong>Per Slot / Sesi</strong>
+                <small>Diskon dikalikan jumlah slot yang dipesan</small>
+              </span>
+            </label>
+          </div>
+          <small v-if="form.discount_apply_to === 'per_slot' && form.discount_type === 'amount'" class="form-hint apply-hint">
+            Contoh: diskon Rp {{ formatCurrency(form.discount_value || 50000) }}/slot → booking 3 slot = diskon Rp {{ formatCurrency((form.discount_value || 50000) * 3) }}
+          </small>
+          <small v-else-if="form.discount_apply_to === 'per_slot' && form.discount_type === 'percentage'" class="form-hint apply-hint">
+            Persentase dihitung dari harga per slot, bukan dari total booking
+          </small>
+          <small v-else class="form-hint apply-hint">
+            Diskon dihitung sekali dari total booking keseluruhan
+          </small>
+        </div>
+
         <!-- Venue -->
         <div class="form-group">
           <label>Venue</label>
@@ -231,6 +269,7 @@ const form = ref({
   discount_type: "percentage",
   discount_value: 0,
   max_discount: null,
+  discount_apply_to: "total",
   bo_venue_id: null,
   start_date: "",
   end_date: "",
@@ -286,6 +325,11 @@ watch(
   }
 );
 
+function formatCurrency(value) {
+  if (!value) return "0";
+  return new Intl.NumberFormat("id-ID").format(value);
+}
+
 async function handleSubmit() {
   // Validasi
   if (form.value.end_date < form.value.start_date) {
@@ -316,6 +360,7 @@ async function handleSubmit() {
       discount_type: form.value.discount_type,
       discount_value: form.value.discount_value,
       max_discount: form.value.max_discount || null,
+      discount_apply_to: form.value.discount_apply_to || 'total',
       bo_venue_id: form.value.bo_venue_id || null,
       start_date: form.value.start_date,
       end_date: form.value.end_date,
@@ -646,14 +691,72 @@ textarea.form-input {
   }
 }
 
-@media (max-height: 600px) {
-  .modal-content {
-    max-height: 100vh;
-    border-radius: 0;
-  }
+/* Discount Apply To options */
+.apply-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
 
-  .modal-overlay {
-    padding: 0;
+.apply-option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #f8fafc;
+  user-select: none;
+}
+
+.apply-option:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.apply-option.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.apply-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.apply-label-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.apply-label-text strong {
+  font-size: 0.9rem;
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.apply-label-text small {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.3;
+}
+
+.apply-hint {
+  color: #2563eb !important;
+  background: #eff6ff;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border-left: 3px solid #3b82f6;
+}
+
+@media (max-width: 480px) {
+  .apply-options {
+    grid-template-columns: 1fr;
   }
 }
 </style>

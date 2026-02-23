@@ -125,6 +125,9 @@
                     </small>
                   </span>
                   <span v-else> Rp {{ formatCurrency(ref.discount_value) }} </span>
+                  <span :class="['badge-apply', ref.discount_apply_to === 'per_slot' ? 'badge-per-slot' : 'badge-total']">
+                    {{ ref.discount_apply_to === 'per_slot' ? '× per slot' : '÷ total' }}
+                  </span>
                 </div>
               </td>
 
@@ -320,6 +323,9 @@
                     </small>
                   </span>
                   <span v-else> Rp {{ formatCurrency(ref.discount_value) }} </span>
+                  <span :class="['badge-apply', ref.discount_apply_to === 'per_slot' ? 'badge-per-slot' : 'badge-total']">
+                    {{ ref.discount_apply_to === 'per_slot' ? '× per slot' : '÷ total' }}
+                  </span>
                 </span>
               </div>
 
@@ -1329,49 +1335,26 @@ function formatCurrency(value) {
   }
 }
 
-@media (max-width: 480px) {
-  .page-header h1 {
-    font-size: 1.1rem;
-  }
+/* Discount apply-to badge */
+.badge-apply {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  margin-top: 0.2rem;
+  white-space: nowrap;
+}
 
-  .btn {
-    font-size: 0.8rem;
-    padding: 0.6rem 0.85rem;
-  }
+.badge-per-slot {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
 
-  .tab {
-    padding: 0.6rem 0.75rem;
-    font-size: 0.8rem;
-  }
-
-  .tab-label {
-    display: none;
-  }
-
-  .filter-tabs {
-    justify-content: space-between;
-  }
-
-  .card-header {
-    flex-direction: column;
-  }
-
-  .card-title {
-    width: 100%;
-  }
-
-  .action-buttons {
-    width: 100%;
-    justify-content: flex-end;
-  }
-
-  .info-label {
-    min-width: 80px;
-    font-size: 0.8rem;
-  }
-
-  .info-value {
-    font-size: 0.8rem;
-  }
+.badge-total {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
 }
 </style>

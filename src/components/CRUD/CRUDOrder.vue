@@ -8,6 +8,7 @@ import RestService from '../../services/rest';
 import AdminBookingService from '../../services/AdminBookingService';
 import BookingService from '../../services/booking';
 import VueQrcode from 'vue-qrcode';
+import { supabase } from '../../plugins/supabaseClient';
 
 const props = defineProps(['entity','objectname','child1name','title','columns','searchfield','details','sortby','candelete','canedit'])
 const i18n = useI18n()
@@ -52,6 +53,322 @@ const originalAllDayPrice = ref(0)
 const existingBookings = ref([])
 const selectedSlotIds = ref([])
 const perPersonForm = ref({})
+
+// ─── CALENDAR LINE PICKER STATE ─────────────────────────────────────────────
+const calMonth = ref(new Date().getMonth())
+const calYear = ref(new Date().getFullYear())
+const calDates = ref([])
+const calSelectedDate = ref(null)      // tanggal yang sedang aktif (diklik)
+const calSlotsByDate = ref({})         // cache: { 'YYYY-MM-DD': slotsArray }
+const calLoadingDate = ref(null)       // tanggal yang sedang di-load
+// Multi-slot selection per date: { 'YYYY-MM-DD': [ {slotId, isPerPerson, jumlah_orang, price, slot_data} ] }
+const calSelectedSlots = ref({})
+const calMtMode = ref(false)       // mode toggle maintenance
+const calMtLoading = ref(null)     // 'dateStr-slotId' yang sedang di-proses
+
+const calMonths = [
+    'Januari','Februari','Maret','April','Mei','Juni',
+    'Juli','Agustus','September','Oktober','November','Desember'
+]
+
+function formatTime(t) {
+    if (!t) return ''
+    return t.slice(0, 5)
+}
+
+function toLocalDateStr(date) {
+    if (!date) return ''
+    const d = date instanceof Date ? date : new Date(date)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${dd}`
+}
+
+function generateCalDates(month, year) {
+    calDates.value = []
+    const lastDay = new Date(year, month + 1, 0).getDate()
+    for (let i = 1; i <= lastDay; i++) {
+        const d = new Date(year, month, i)
+        calDates.value.push({
+            date: d,
+            dateStr: toLocalDateStr(d),
+            dayname: d.toLocaleDateString('id-ID', { weekday: 'short' }),
+            tgl: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+        })
+    }
+    // Auto-select first date (or today if in current month)
+    if (calDates.value.length > 0) {
+        const today = toLocalDateStr(new Date())
+        const todayEntry = calDates.value.find(d => d.dateStr === today)
+        selectCalDate(todayEntry || calDates.value[0])
+    }
+}
+
+function prevCalMonth() {
+    if (calMonth.value === 0) { calMonth.value = 11; calYear.value-- }
+    else calMonth.value--
+    generateCalDates(calMonth.value, calYear.value)
+}
+function nextCalMonth() {
+    if (calMonth.value === 11) { calMonth.value = 0; calYear.value++ }
+    else calMonth.value++
+    generateCalDates(calMonth.value, calYear.value)
+}
+
+async function selectCalDate(dateObj) {
+    calSelectedDate.value = dateObj
+    const dateStr = dateObj.dateStr
+    if (calSlotsByDate.value[dateStr]) return  // sudah di-cache
+    calLoadingDate.value = dateStr
+    try {
+        await loadExistingBookingsForDate(form.value.bo_venue_id, dateObj.date)
+        const slots = await fetchAvailableSlots(form.value.bo_venue_id, dateObj.date)
+        // simpan copy existingBookings untuk tanggal ini
+        calSlotsByDate.value[dateStr] = {
+            slots: (slots || []).filter(s => !s.isAllDay),
+            bookings: [...existingBookings.value]
+        }
+    } finally {
+        calLoadingDate.value = null
+    }
+}
+
+function getCalSlots(dateStr) {
+    return calSlotsByDate.value[dateStr]?.slots || []
+}
+
+function getCalSlotStatus(dateStr, slot) {
+    const bookings = calSlotsByDate.value[dateStr]?.bookings || []
+    const booked = bookings.find(b => b.bo_slot_id === slot.id)
+    if (booked && ['WP','CO','MT'].includes(booked.status)) return booked.status
+    // Cek apakah sudah ada di tempLines
+    const inTemp = [...tempDataline.value, ...tempJoggingLines.value].find(l =>
+        l.bo_slot_id === slot.id && toLocalDateStr(new Date(l.tanggal)) === dateStr
+    )
+    if (inTemp) return 'ADDED'
+    return null
+}
+
+function isCalSlotSelected(dateStr, slot) {
+    return (calSelectedSlots.value[dateStr] || []).some(s => s.slotId === slot.id)
+}
+
+function getCalSlotClass(dateStr, slot) {
+    const status = getCalSlotStatus(dateStr, slot)
+    const selected = isCalSlotSelected(dateStr, slot)
+    if (status === 'ADDED') return 'bg-green-600 text-white cursor-not-allowed opacity-80'
+    if (selected) return 'bg-gradient-to-br from-[#0A0E4F] to-[#5B21B6] text-white shadow-lg scale-105 ring-2 ring-purple-400'
+    if (status === 'CO') return 'bg-red-500 text-white cursor-not-allowed opacity-70'
+    if (status === 'WP') return 'bg-yellow-400 text-gray-800 cursor-not-allowed opacity-70'
+    if (status === 'MT') return 'bg-gray-500 text-white cursor-not-allowed opacity-80'
+    return 'bg-white border-2 border-gray-200 text-gray-800 hover:border-purple-500 hover:bg-purple-50 hover:scale-105'
+}
+
+function toggleCalSlot(dateStr, slot, dateObj) {
+    const status = getCalSlotStatus(dateStr, slot)
+    if (['WP','CO','MT','ADDED'].includes(status)) return
+
+    if (!calSelectedSlots.value[dateStr]) calSelectedSlots.value[dateStr] = []
+    const idx = calSelectedSlots.value[dateStr].findIndex(s => s.slotId === slot.id)
+    if (idx > -1) {
+        calSelectedSlots.value[dateStr].splice(idx, 1)
+        if (slot.isPerPerson && perPersonForm.value[`${dateStr}-${slot.id}`]) {
+            delete perPersonForm.value[`${dateStr}-${slot.id}`]
+        }
+    } else {
+        calSelectedSlots.value[dateStr].push({
+            slotId: slot.id,
+            isPerPerson: slot.isPerPerson,
+            slot_data: slot,
+            dateObj
+        })
+        if (slot.isPerPerson) {
+            perPersonForm.value[`${dateStr}-${slot.id}`] = { jumlah_orang: 1 }
+        }
+    }
+}
+
+const calTotalSelected = computed(() => {
+    return Object.values(calSelectedSlots.value).reduce((sum, arr) => sum + arr.length, 0)
+})
+
+const calTotalPrice = computed(() => {
+    let total = 0
+    Object.entries(calSelectedSlots.value).forEach(([dateStr, slots]) => {
+        slots.forEach(s => {
+            if (s.isPerPerson) {
+                const pp = perPersonForm.value[`${dateStr}-${s.slotId}`]
+                total += (s.slot_data.pricePerPerson || 0) * (pp?.jumlah_orang || 1)
+            } else {
+                total += s.slot_data.price || 0
+            }
+        })
+    })
+    return total
+})
+
+// All Day untuk tanggal yang sedang aktif (hanya slot regular, non-booked)
+function isAllDayCalSelected(dateStr) {
+    const slots = getCalSlots(dateStr).filter(s => !s.isPerPerson)
+    if (slots.length === 0) return false
+    return slots.every(s => {
+        const status = getCalSlotStatus(dateStr, s)
+        if (['WP','CO','MT','ADDED'].includes(status)) return true // skip blocked
+        return isCalSlotSelected(dateStr, s)
+    })
+}
+
+function toggleAllDayCal(dateStr, dateObj) {
+    const slots = getCalSlots(dateStr).filter(s => !s.isPerPerson)
+    const availSlots = slots.filter(s => !['WP','CO','MT','ADDED'].includes(getCalSlotStatus(dateStr, s)))
+    if (availSlots.length === 0) return
+
+    const allSelected = availSlots.every(s => isCalSlotSelected(dateStr, s))
+    if (allSelected) {
+        // deselect all
+        if (calSelectedSlots.value[dateStr]) {
+            calSelectedSlots.value[dateStr] = calSelectedSlots.value[dateStr].filter(
+                sel => !availSlots.some(s => s.id === sel.slotId)
+            )
+        }
+    } else {
+        // select all available regular slots
+        if (!calSelectedSlots.value[dateStr]) calSelectedSlots.value[dateStr] = []
+        availSlots.forEach(s => {
+            if (!isCalSlotSelected(dateStr, s)) {
+                calSelectedSlots.value[dateStr].push({
+                    slotId: s.id,
+                    isPerPerson: false,
+                    slot_data: s,
+                    dateObj
+                })
+            }
+        })
+    }
+}
+
+async function saveCalendarSlots() {
+    const dateEntries = Object.entries(calSelectedSlots.value)
+    if (dateEntries.length === 0) {
+        toast.add({ severity: 'warn', summary: 'Warning', detail: 'Pilih setidaknya satu slot', life: 3000 })
+        return
+    }
+    let addedCount = 0
+    for (const [dateStr, slots] of dateEntries) {
+        for (const s of slots) {
+            const dateVal = s.dateObj.date
+            if (s.isPerPerson) {
+                const pp = perPersonForm.value[`${dateStr}-${s.slotId}`]
+                const jumlah = pp?.jumlah_orang || 1
+                const priceInfo = await adminBookingService.getSlotPrice(form.value.bo_venue_id, s.slotId, dateVal)
+                tempJoggingLines.value.push({
+                    temp_id: Date.now() + Math.random(),
+                    bo_slot_id: s.slotId,
+                    tanggal: dateVal,
+                    jumlah_orang: jumlah,
+                    harga_per_orang: priceInfo.pricePerPerson,
+                    price: priceInfo.pricePerPerson * jumlah,
+                    slot_data: s.slot_data
+                })
+            } else {
+                const priceInfo = await adminBookingService.getSlotPrice(form.value.bo_venue_id, s.slotId, dateVal)
+                tempDataline.value.push({
+                    temp_id: Date.now() + Math.random(),
+                    bo_slot_id: s.slotId,
+                    tanggal: dateVal,
+                    price: priceInfo.price,
+                    slot_data: s.slot_data
+                })
+            }
+            addedCount++
+        }
+    }
+    toast.add({ severity: 'success', summary: 'Success', detail: `${addedCount} slot berhasil ditambahkan`, life: 3000 })
+    showLineDialog.value = false
+    calSelectedSlots.value = {}
+    perPersonForm.value = {}
+}
+
+// Reset calendar state saat dialog dibuka
+function openAddLineDialog() {
+    if (!form.value.bo_venue_id) {
+        toast.add({ severity: 'warn', summary: 'Warning', detail: 'Please select venue first', life: 3000 })
+        return
+    }
+    calMonth.value = new Date().getMonth()
+    calYear.value = new Date().getFullYear()
+    calSlotsByDate.value = {}
+    calSelectedSlots.value = {}
+    calSelectedDate.value = null
+    calMtMode.value = false
+    perPersonForm.value = {}
+    generateCalDates(calMonth.value, calYear.value)
+    showLineDialog.value = true
+}
+// ─── MAINTENANCE TOGGLE ──────────────────────────────────────────────────────
+async function toggleMaintenanceSlot(dateStr, slot, dateObj) {
+    const key = `${dateStr}-${slot.id}`
+    if (calMtLoading.value === key) return
+    calMtLoading.value = key
+
+    try {
+        const status = getCalSlotStatus(dateStr, slot)
+
+        if (status === 'MT') {
+            // Hapus booking MT yang ada
+            const bookings = calSlotsByDate.value[dateStr]?.bookings || []
+            const mtBooking = bookings.find(b => b.bo_slot_id === slot.id && b.status === 'MT')
+            if (mtBooking?.bo_booking_id) {
+                // Soft-delete bookingline MT ini
+                await svcline.delete(mtBooking.id)
+                toast.add({ severity: 'success', summary: 'Maintenance dilepas', detail: `${formatTime(slot.start_time)} - ${formatTime(slot.end_time)}`, life: 2000 })
+            }
+        } else if (!status || status === null) {
+            // Buat booking header MT dulu (dummy user admin), lalu bookingline
+            // Kita gunakan existing form venue
+            const mtBookingResult = await svc.add({
+                bo_venue_id: form.value.bo_venue_id,
+                bo_user_id: form.value.bo_user_id || null,
+                bookingdate: dateObj.date.toISOString(),
+                created: new Date().toISOString(),
+                grandtotal: 0,
+                original_total: 0,
+                discount_amount: 0,
+                status: 'MT',
+                isactive: true
+            })
+            if (mtBookingResult.error) throw new Error(mtBookingResult.error.message)
+            const newBookingId = mtBookingResult.data[0].id
+
+            const lineResult = await svcline.add({
+                bo_booking_id: newBookingId,
+                bo_slot_id: slot.id,
+                bo_venue_id: form.value.bo_venue_id,
+                tanggal: dateStr,
+                price: 0,
+                isactive: true
+            })
+            if (lineResult.error) throw new Error(lineResult.error.message)
+            toast.add({ severity: 'warn', summary: 'Maintenance aktif', detail: `${formatTime(slot.start_time)} - ${formatTime(slot.end_time)}`, life: 2000 })
+        } else {
+            toast.add({ severity: 'warn', summary: 'Slot sudah terisi', detail: 'Hanya slot kosong yang bisa di-set maintenance', life: 2000 })
+            return
+        }
+
+        // Refresh cache untuk tanggal ini
+        delete calSlotsByDate.value[dateStr]
+        if (calSelectedDate.value?.dateStr === dateStr) {
+            await selectCalDate(calSelectedDate.value)
+        }
+    } catch (err) {
+        console.error(err)
+        toast.add({ severity: 'error', summary: 'Error', detail: err.message || 'Gagal ubah maintenance', life: 3000 })
+    } finally {
+        calMtLoading.value = null
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Venue filter
 const venues = ref([])
@@ -188,32 +505,59 @@ const loadExistingBookingsForDate = async (venueId, date) => {
         return
     }
     try {
-        const dateStr = new Date(date).toISOString().slice(0, 10)
-        // bo_bookingline tidak punya bo_venue_id, filter lewat bo_booking dulu
-        const bookingWhere = [
-            { field: 'bo_venue_id', op: 'eq', value: venueId },
-            { field: 'isactive', op: 'eq', value: true }
-        ]
-        const bookingResult = await svc.listwhere(0, 500, bookingWhere)
-        const bookingIds = bookingResult.data ? bookingResult.data.map(b => b.id) : []
-        if (bookingIds.length === 0) {
-            existingBookings.value = []
-            return
+        // Gunakan toLocalDateStr agar tidak timezone shift
+        const dateStr = date instanceof Date ? toLocalDateStr(date) : String(date).slice(0, 10)
+
+        // === TIRU CARA CUSTOMER: pakai supabase embedded filter ===
+        // bo_bookingline — filter by bo_venue_id dan status via !inner join
+        const [regularResult, joggingResult] = await Promise.all([
+            supabase
+                .from('bo_bookingline')
+                .select('tanggal, bo_slot_id, bo_booking!inner(id, status, bo_venue_id)')
+                .eq('bo_booking.bo_venue_id', venueId)
+                .in('bo_booking.status', ['WP', 'CO', 'MT'])
+                .eq('isactive', true),
+            supabase
+                .from('bo_bookingline_jogging')
+                .select('tanggal, bo_slot_id, bo_booking!inner(id, status)')
+                .eq('bo_venue_id', venueId)
+                .in('bo_booking.status', ['WP', 'CO', 'MT'])
+                .eq('isactive', true)
+        ])
+
+        // Helper: normalkan tanggal dari DB ke YYYY-MM-DD
+        // DB menyimpan campuran: "2026-02-25T17:00:00", "2026-02-25T00:00:00", dll.
+        // Gunakan date part (slice 0-10) yang merupakan tanggal lokal yang disimpan
+        const normalizeDbDate = (tanggal) => {
+            if (!tanggal) return null
+            return String(tanggal).slice(0, 10)
         }
-        const lineWhere = [
-            { field: 'bo_booking_id', op: 'in', value: bookingIds },
-            { field: 'tanggal', op: 'eq', value: dateStr },
-            { field: 'isactive', op: 'eq', value: true }
-        ]
-        const result = await svcline.listwhere(0, 250, lineWhere)
-        if (result.data && result.data.length > 0) {
-            existingBookings.value = result.data.map(line => {
-                const booking = bookingResult.data.find(b => b.id === line.bo_booking_id)
-                return { ...line, status: booking?.status || 'UNKNOWN' }
-            })
-        } else {
-            existingBookings.value = []
+
+        const combined = []
+
+        if (regularResult.data) {
+            regularResult.data
+                .filter(item => normalizeDbDate(item.tanggal) === dateStr)
+                .forEach(item => combined.push({
+                    bo_slot_id: item.bo_slot_id,
+                    tanggal: item.tanggal,
+                    status: item.bo_booking.status
+                }))
         }
+
+        if (joggingResult.data) {
+            joggingResult.data
+                .filter(item => normalizeDbDate(item.tanggal) === dateStr)
+                .forEach(item => combined.push({
+                    bo_slot_id: item.bo_slot_id,
+                    tanggal: item.tanggal,
+                    status: item.bo_booking.status,
+                    _isJogging: true
+                }))
+        }
+
+        existingBookings.value = combined
+
     } catch (err) {
         console.error('Error loading existing bookings:', err)
         existingBookings.value = []
@@ -326,18 +670,20 @@ const createPayment = async (bookingId, userId, totalAmount) => {
 }
 
 const onSave = async ()=>{
+    const isMT = form.value.status === 'MT'
+
     // Validasi
     if(!form.value.bo_venue_id) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please select venue', life: 3000})
         return
     }
     
-    if(!form.value.bo_user_id) {
+    if(!isMT && !form.value.bo_user_id) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please select user', life: 3000})
         return
     }
     
-    if(tempDataline.value.length === 0 && tempJoggingLines.value.length === 0 && !isupdating.value) {
+    if(!isMT && tempDataline.value.length === 0 && tempJoggingLines.value.length === 0 && !isupdating.value) {
         toast.add({severity:'warn', summary:'Warning', detail:'Please add at least one booking line', life: 3000})
         return
     }
@@ -435,12 +781,14 @@ const onSave = async ()=>{
             
             const newBookingId = saveResult.data[0].id
             
-            // Create payment
-            try {
-                await createPayment(newBookingId, form.value.bo_user_id, form.value.grandtotal)
-            } catch(err) {
-                console.error('Payment creation failed:', err)
-                toast.add({severity:'warn',summary:'Warning',detail:'Booking created but payment creation failed', life: 3000})
+            // Create payment (skip untuk MT)
+            if (!isMT) {
+                try {
+                    await createPayment(newBookingId, form.value.bo_user_id, form.value.grandtotal)
+                } catch(err) {
+                    console.error('Payment creation failed:', err)
+                    toast.add({severity:'warn',summary:'Warning',detail:'Booking created but payment creation failed', life: 3000})
+                }
             }
             
             // Save regular lines
@@ -1496,9 +1844,9 @@ const linesByDate = computed(() => {
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-base sm:text-lg font-bold">Booking Lines</h3>
                     <Button 
-                        @click="addLine" 
+                        @click="openAddLineDialog" 
                         severity="primary" 
-                        icon="pi pi-plus" 
+                        icon="pi pi-calendar" 
                         :label="$t('Add Line')"
                         :disabled="!form.bo_venue_id"
                         size="small"
@@ -1694,7 +2042,7 @@ const linesByDate = computed(() => {
             </div>
 
             <!-- Add/Edit Charge Dialog -->
-            <Dialog v-model:visible="showChargeDialog" modal :header="isEditingCharge ? 'Edit Biaya Tambahan' : 'Tambah Biaya Tambahan'" :style="{ width: 'min(95vw, 28rem)' }">
+            <Dialog v-model:visible="showChargeDialog" modal appendTo="body" :header="isEditingCharge ? 'Edit Biaya Tambahan' : 'Tambah Biaya Tambahan'" :style="{ width: 'min(95vw, 28rem)' }" :pt="{ root: { style: 'z-index: 9999 !important' }, mask: { style: 'z-index: 9998 !important' } }">
                 <div class="flex flex-col gap-4 py-2">
                     <div class="flex flex-col gap-1">
                         <label class="text-sm font-semibold">Keterangan <span class="text-red">*</span></label>
@@ -1725,120 +2073,234 @@ const linesByDate = computed(() => {
                 </template>
             </Dialog>
 
-            <Dialog v-model:visible="showLineDialog" modal header="Add Booking Line" :style="{ width: 'min(95vw, 38rem)' }">
-                <div class="flex flex-col gap-4">
-                    <div class="flex flex-col gap-2">
-                        <label for="bookingdate">Booking Date <span class="text-red">*</span></label>
-                        <DatePicker 
-                            id="tanggal" 
-                            v-model="lineForm.tanggal" 
-                            dateFormat="dd/mm/yy"
-                            placeholder="Select booking date"
-                        />
-                    </div>
-                    
-                    <div class="flex flex-col gap-2">
-                        <label>Slot <span class="text-red">*</span></label>
-                        <div v-if="isLineLoading" class="flex items-center gap-2 text-gray-500 p-2">
-                            <i class="pi pi-spin pi-spinner"></i> Loading slots...
-                        </div>
-                        <div v-else-if="availableSlots.length === 0" class="text-gray-500 p-2">
-                            No slots available.
-                        </div>
-                        <div v-else class="border rounded-lg overflow-hidden">
-                            <!-- Select All Regular Slots -->
-                            <div 
-                                class="flex items-center justify-between px-3 py-2 bg-gray-100 border-b cursor-pointer hover:bg-gray-200"
-                                @click.stop="onToggleAllDay(!isAllRegularSelected)"
+            <Dialog 
+                v-model:visible="showLineDialog" 
+                modal 
+                appendTo="body"
+                header="Pilih Slot Booking" 
+                :style="{ width: 'min(98vw, 860px)', height: 'min(92vh, 640px)' }"
+                :pt="{ 
+                    root: { style: 'z-index: 10001 !important' },
+                    mask: { style: 'z-index: 10000 !important' },
+                    content: { class: 'p-0 flex flex-col flex-1 overflow-hidden', style: 'height: calc(100% - 57px)' }
+                }"
+            >
+                <div class="flex flex-col h-full overflow-hidden">
+                    <!-- Month navigation -->
+                    <div class="flex items-center justify-between px-4 py-2.5 bg-[#0A0E4F] text-white flex-shrink-0">
+                        <div class="flex items-center gap-2">
+                            <button 
+                                @click="prevCalMonth"
+                                class="p-1.5 rounded-lg hover:bg-white/10 transition-all"
                             >
-                                <div class="flex items-center gap-3">
-                                    <input 
-                                        type="checkbox" 
-                                        :checked="isAllRegularSelected" 
-                                        @change.stop="onToggleAllDay($event.target.checked)"
-                                        class="w-4 h-4 accent-blue-600 cursor-pointer"
-                                    />
-                                    <span class="font-bold text-gray-700">All Day (select all regular slots)</span>
-                                </div>
-                                <span class="text-sm text-gray-500">
-                                    {{ availableSlots.filter(s => !s.isAllDay && !s.isPerPerson && !s.isBooked).length }} slots
-                                </span>
-                            </div>
-                            
-                            <!-- Slot list (exclude All Day option) -->
-                            <div class="max-h-52 sm:max-h-64 overflow-y-auto divide-y">
-                                <div 
-                                    v-for="slot in availableSlots.filter(s => !s.isAllDay)" 
-                                    :key="slot.id"
-                                    class="flex items-center justify-between px-3 py-2"
-                                    :class="slot.isBooked ? 'opacity-50 bg-gray-50' : 'hover:bg-blue-50 cursor-pointer'"
-                                    @click="!slot.isBooked && onToggleSlot(slot)"
+                                <i class="pi pi-chevron-left text-sm"></i>
+                            </button>
+                            <span class="font-bold text-sm min-w-[130px] text-center">{{ calMonths[calMonth] }} {{ calYear }}</span>
+                            <button @click="nextCalMonth" class="p-1.5 rounded-lg hover:bg-white/10 transition-all">
+                                <i class="pi pi-chevron-right text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Status legend -->
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5 bg-gray-50 border-b text-xs font-medium text-gray-600 flex-shrink-0">
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded border-2 border-gray-300 inline-block"></span>Tersedia</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-[#0A0E4F] inline-block"></span>Dipilih</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-green-600 inline-block"></span>Ditambah</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-red-500 inline-block"></span>Booked</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-yellow-400 inline-block"></span>Pending</span>
+                        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-gray-500 inline-block"></span>Maintenance</span>
+                    </div>
+
+                    <!-- Body: date list + slot grid -->
+                    <div class="flex flex-1 min-h-0 overflow-hidden">
+                        <!-- Left: date list -->
+                        <div class="w-28 flex-shrink-0 overflow-y-auto border-r bg-white">
+                            <div class="flex flex-col gap-0.5 p-1.5">
+                                <div v-if="calDates.length === 0" class="text-xs text-gray-400 p-2 text-center">Tidak ada tanggal</div>
+                                <button
+                                    v-for="d in calDates"
+                                    :key="d.dateStr"
+                                    @click="selectCalDate(d)"
+                                    class="flex items-center justify-between px-2 py-1.5 rounded-lg transition-all text-left w-full"
+                                    :class="calSelectedDate?.dateStr === d.dateStr
+                                        ? 'bg-[#0A0E4F] text-white shadow'
+                                        : d.dateStr < toLocalDateStr(new Date())
+                                            ? 'text-gray-400 hover:bg-gray-100'
+                                            : 'hover:bg-gray-100 text-gray-700'"
                                 >
-                                    <div class="flex items-center gap-3 flex-1">
-                                        <input 
-                                            type="checkbox"
-                                            :checked="selectedSlotIds.includes(slot.id)"
-                                            :disabled="slot.isBooked"
-                                            @change.stop="!slot.isBooked && onToggleSlot(slot)"
-                                            class="w-4 h-4 accent-blue-600 cursor-pointer"
-                                            :class="slot.isBooked ? 'cursor-not-allowed' : ''"
-                                        />
-                                        <div class="flex-1">
-                                            <div class="flex items-center gap-2">
-                                                <span :class="slot.isBooked ? 'line-through text-gray-400' : ''">
-                                                    {{ slot.name }}
-                                                    <span v-if="!slot.isPerPerson" class="text-gray-500 text-sm">
-                                                        ({{ slot.start_time }} - {{ slot.end_time }})
-                                                    </span>
+                                    <div>
+                                        <div class="text-[10px] opacity-60 uppercase leading-none">{{ d.dayname }}</div>
+                                        <div class="text-xs font-bold leading-tight mt-0.5" :class="d.dateStr < toLocalDateStr(new Date()) && calSelectedDate?.dateStr !== d.dateStr ? 'line-through opacity-60' : ''">{{ d.tgl }}</div>
+                                    </div>
+                                    <!-- Dot: ada slot dipilih -->
+                                    <span 
+                                        v-if="calSelectedSlots[d.dateStr]?.length"
+                                        class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                                        :class="calSelectedDate?.dateStr === d.dateStr ? 'bg-yellow-400' : 'bg-purple-500'"
+                                    ></span>
+                                    <i v-else-if="calLoadingDate === d.dateStr" class="pi pi-spin pi-spinner text-[9px] opacity-50"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Right: slot grid -->
+                        <div class="flex-1 overflow-y-auto p-3">
+                            <!-- Empty state -->
+                            <div v-if="!calSelectedDate" class="flex items-center justify-center h-full text-gray-400">
+                                <div class="text-center">
+                                    <i class="pi pi-calendar text-4xl mb-2 block opacity-40"></i>
+                                    <span class="text-sm">Pilih tanggal di sebelah kiri</span>
+                                </div>
+                            </div>
+
+                            <!-- Loading -->
+                            <div v-else-if="calLoadingDate === calSelectedDate.dateStr" class="flex items-center justify-center h-full text-gray-400">
+                                <div class="text-center">
+                                    <i class="pi pi-spin pi-spinner text-3xl mb-2 block"></i>
+                                    <span class="text-sm">Memuat slot...</span>
+                                </div>
+                            </div>
+
+                            <div v-else>
+                                <!-- Date title -->
+                                <div class="flex items-center gap-2 mb-2.5">
+                                    <i class="pi pi-calendar-plus text-purple-600 text-sm"></i>
+                                    <span class="font-bold text-[#0A0E4F] text-sm">
+                                        {{ calSelectedDate.date.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) }}
+                                    </span>
+                                    <span v-if="calSelectedSlots[calSelectedDate.dateStr]?.length" class="ml-auto text-xs font-bold px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">
+                                        {{ calSelectedSlots[calSelectedDate.dateStr].length }} dipilih
+                                    </span>
+                                </div>
+
+                                <!-- No slots -->
+                                <div v-if="getCalSlots(calSelectedDate.dateStr).length === 0" class="p-6 text-center text-gray-400 bg-gray-50 rounded-xl">
+                                    <i class="pi pi-clock text-3xl mb-2 block"></i>
+                                    <span class="text-sm">Tidak ada slot tersedia</span>
+                                </div>
+
+                                <template v-else>
+                                    <!-- All Day button -->
+                                    <div class="mb-2">
+                                        <button
+                                            @click="toggleAllDayCal(calSelectedDate.dateStr, calSelectedDate)"
+                                            class="w-full flex items-center justify-between px-3 py-2 rounded-lg border-2 transition-all text-sm font-semibold"
+                                            :class="isAllDayCalSelected(calSelectedDate.dateStr)
+                                                ? 'bg-[#0A0E4F] text-white border-[#0A0E4F]'
+                                                : 'bg-gray-50 text-gray-700 border-gray-200 hover:border-purple-400 hover:bg-purple-50'"
+                                        >
+                                            <span class="flex items-center gap-2">
+                                                <i class="pi pi-check-square"></i>
+                                                All Day — pilih semua slot reguler
+                                            </span>
+                                            <span class="text-xs opacity-70">
+                                                {{ getCalSlots(calSelectedDate.dateStr).filter(s => !s.isPerPerson && !['WP','CO','MT','ADDED'].includes(getCalSlotStatus(calSelectedDate.dateStr, s))).length }} slot
+                                            </span>
+                                        </button>
+                                    </div>
+
+                                    <!-- Slot grid -->
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                                    <div
+                                        v-for="slot in getCalSlots(calSelectedDate.dateStr)"
+                                        :key="slot.id"
+                                        @click="toggleCalSlot(calSelectedDate.dateStr, slot, calSelectedDate)"
+                                        class="relative px-2 py-2 text-center rounded-xl cursor-pointer transition-all duration-200 select-none"
+                                        :class="getCalSlotClass(calSelectedDate.dateStr, slot)"
+                                    >
+                                        <!-- MT loading spinner -->
+                                        <div v-if="calMtLoading === `${calSelectedDate.dateStr}-${slot.id}`" class="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl">
+                                            <i class="pi pi-spin pi-spinner text-white"></i>
+                                        </div>
+
+                                        <!-- Checkmark -->
+                                        <div v-if="isCalSlotSelected(calSelectedDate.dateStr, slot)" class="absolute top-1 right-1">
+                                            <i class="pi pi-check-circle text-white text-xs"></i>
+                                        </div>
+
+                                        <!-- Time -->
+                                        <div class="text-xs font-bold leading-tight">
+                                            {{ formatTime(slot.start_time) }} s/d {{ formatTime(slot.end_time) }}
+                                        </div>
+
+                                        <!-- Sub-label -->
+                                        <div class="text-[10px] mt-0.5 leading-tight">
+                                            <template v-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'MT'">
+                                                <span class="opacity-90">🔧 Maintenance</span>
+                                            </template>
+                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'CO'">
+                                                <span class="opacity-80">✗ Booked</span>
+                                            </template>
+                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'WP'">
+                                                <span class="opacity-80">⏳ Pending</span>
+                                            </template>
+                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'ADDED'">
+                                                <span class="opacity-80">✓ Ditambah</span>
+                                            </template>
+                                            <template v-else>
+                                                <span class="font-semibold opacity-90">
+                                                    {{ slot.isPerPerson ? `Rp ${formatCurrency(slot.pricePerPerson)}/org` : `Rp ${formatCurrency(slot.price)}` }}
                                                 </span>
-                                                <Tag v-if="slot.isPerPerson" severity="info" value="Per Person" class="text-xs"></Tag>
-                                                <Tag v-if="slot.isBooked" severity="danger" :value="slot.bookingStatus" class="text-xs"></Tag>
-                                            </div>
-                                            <!-- Input jumlah orang untuk per-person slot yang dipilih -->
-                                            <div v-if="slot.isPerPerson && selectedSlotIds.includes(slot.id)" class="mt-1 flex items-center gap-2" @click.stop>
-                                                <small class="text-gray-600">People:</small>
-                                                <InputNumber 
-                                                    v-model="perPersonForm[slot.id].jumlah_orang"
-                                                    :min="1"
-                                                    :max="slot.capacity"
-                                                    inputClass="w-20 text-sm p-1"
-                                                    @input="onJumlahOrangChange(slot)"
-                                                />
-                                                <small class="text-gray-500">/ {{ slot.capacity }}</small>
-                                            </div>
+                                            </template>
                                         </div>
                                     </div>
-                                    <div class="text-right ml-3 shrink-0">
-                                        <span class="font-bold text-sm">
-                                            {{ slot.isPerPerson 
-                                                ? formatCurrency(slot.pricePerPerson) + '/orang' 
-                                                : formatCurrency(slot.price) 
-                                            }}
+                                </div>
+
+                                <!-- Per-person inputs -->
+                                <div 
+                                    v-if="calSelectedSlots[calSelectedDate.dateStr]?.some(s => s.isPerPerson)"
+                                    class="mt-3 space-y-1.5"
+                                >
+                                    <div class="text-sm font-bold text-gray-700">Jumlah Orang</div>
+                                    <div 
+                                        v-for="s in calSelectedSlots[calSelectedDate.dateStr].filter(s => s.isPerPerson)"
+                                        :key="s.slotId"
+                                        class="flex items-center gap-3 p-2 bg-blue-50 rounded-lg"
+                                    >
+                                        <span class="text-sm flex-1">
+                                            {{ formatTime(s.slot_data.start_time) }} - {{ formatTime(s.slot_data.end_time) }}
+                                            <span class="text-xs text-gray-500 ml-1">(Rp {{ formatCurrency(s.slot_data.pricePerPerson) }}/org)</span>
                                         </span>
+                                        <div class="flex items-center gap-1.5">
+                                            <button 
+                                                @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.max(1, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)-1)"
+                                                class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
+                                            >-</button>
+                                            <span class="w-7 text-center font-bold text-sm">{{ perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang || 1 }}</span>
+                                            <button 
+                                                @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.min(s.slot_data.capacity||99, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)+1)"
+                                                class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
+                                            >+</button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                                </template><!-- end v-else (slots exist) -->
                         </div>
-                        
-                        <!-- Summary selected -->
-                        <div v-if="selectedSlotIds.length > 0" class="p-2 bg-blue-50 rounded text-sm text-blue-700">
-                            <strong>{{ selectedSlotIds.length }}</strong> slot(s) selected
+                    </div>
+
+                    <!-- Footer -->
+                    <div class="border-t bg-gray-50 px-4 py-2.5 flex items-center justify-between gap-3 flex-shrink-0">
+                        <div class="text-sm">
+                            <span v-if="calTotalSelected > 0" class="font-bold text-purple-700">
+                                {{ calTotalSelected }} slot dipilih · <span class="text-green-700">Rp {{ formatCurrency(calTotalPrice) }}</span>
+                            </span>
+                            <span v-else class="text-gray-400 text-xs">Belum ada slot dipilih</span>
+                        </div>
+                        <div class="flex gap-2 shrink-0">
+                            <Button label="Tutup" severity="secondary" variant="outlined" size="small" @click="showLineDialog = false" />
+                            <Button 
+                                label="Tambahkan" 
+                                icon="pi pi-check"
+                                size="small"
+                                @click="saveCalendarSlots" 
+                                :loading="isLineLoading" 
+                                :disabled="calTotalSelected === 0"
+                            />
                         </div>
                     </div>
                 </div>
-                
-                <template #footer>
-                    <div class="flex justify-between w-full">
-                        <Button label="Close" severity="secondary" @click="showLineDialog = false" outlined />
-                        <Button 
-                            label="Add Selected" 
-                            icon="pi pi-check"
-                            @click="saveMultipleSlots" 
-                            :loading="isLineLoading" 
-                            :disabled="selectedSlotIds.length === 0"
-                        />
-                    </div>
-                </template>
+                </div>
             </Dialog>
         </div>
     </div>
@@ -1849,9 +2311,10 @@ const linesByDate = computed(() => {
     <Dialog 
         v-model:visible="showTicketDialog" 
         modal 
+        appendTo="body"
         :header="ticketData ? `Tiket Booking — ${ticketData.skey || ticketData.id}` : 'Memuat Tiket...'"
         :style="{ width: 'min(98vw, 680px)' }"
-        :pt="{ content: { class: 'p-0' } }"
+        :pt="{ root: { style: 'z-index: 9999 !important' }, mask: { style: 'z-index: 9998 !important' }, content: { class: 'p-0' } }"
     >
         <!-- Loading state -->
         <div v-if="isLoadingTicket" class="flex flex-col items-center justify-center py-16 gap-4">
