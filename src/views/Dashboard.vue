@@ -32,7 +32,6 @@
                         <span class="badge-co">CO {{ summary.statusCount.CO || 0 }}</span>
                         <span class="badge-wp">WP {{ summary.statusCount.WP || 0 }}</span>
                         <span class="badge-mt">MT {{ summary.statusCount.MT || 0 }}</span>
-                        <span class="badge-cl">CL {{ summary.statusCount.CL || 0 }}</span>
                     </div>
                 </div>
             </div>
@@ -88,7 +87,7 @@
         <div class="calendar-section">
             <div class="calendar-header">
                 <div class="calendar-header-top">
-                    <h2 class="calendar-title">Kalender Venue — {{ monthNames[calendarMonth] }} {{ calendarYear }}</h2>
+                    <h2 class="calendar-title">Calendar Booking</h2>
                     <div class="calendar-selectors">
                         <select v-model="calendarYear" @change="onCalendarDateChange" class="dash-select">
                             <option v-for="y in yearOptions" :key="y" :value="y">{{ y }}</option>
@@ -115,49 +114,127 @@
                 Tidak ada venue ditemukan.
             </div>
 
-            <div v-else class="venue-tabs">
-                <div class="venue-tab-buttons">
+            <div v-else>
+                <!-- Venue tabs -->
+                <div class="venue-tab-buttons" style="margin-bottom:0.75rem">
                     <button
                         v-for="venue in venues"
                         :key="venue.id"
                         :class="['venue-tab-btn', selectedVenueId === venue.id ? 'active' : '']"
                         @click="selectedVenueId = venue.id"
-                    >
-                        {{ venue.name }}
-                    </button>
+                    >{{ venue.name }}</button>
                 </div>
 
-                <div class="calendar-grid-wrapper" v-if="selectedVenue">
-                    <div class="calendar-grid" :style="`--days: ${calendarDays.length}`">
-                        <!-- Header: slot names -->
-                        <div class="cal-corner">Slot / Tanggal</div>
-                        <div
-                            v-for="day in calendarDays"
-                            :key="day.dateStr"
-                            class="cal-date-header"
-                            :class="{ 'is-today': day.isToday, 'is-weekend': day.isWeekend }"
-                        >
-                            <span class="cal-dayname">{{ day.dayName }}</span>
-                            <span class="cal-daynum">{{ day.dayNum }}</span>
-                        </div>
+                <!-- Time-grid calendar toolbar -->
+                <div class="tg-toolbar">
+                    <div class="tg-toolbar-left">
+                        <button class="tg-btn" @click="goToToday">Today</button>
+                        <button class="tg-btn tg-nav" @click="prevPeriod">‹</button>
+                        <button class="tg-btn tg-nav" @click="nextPeriod">›</button>
+                        <span class="tg-range-label">{{ weekRangeLabel }}</span>
+                    </div>
+                    <div class="tg-toolbar-right">
+                        <button :class="['tg-btn', calView==='day'?'tg-btn-active':'']" @click="setCalView('day')">Day</button>
+                        <button :class="['tg-btn', calView==='week'?'tg-btn-active':'']" @click="setCalView('week')">Week</button>
+                        <button :class="['tg-btn', calView==='month'?'tg-btn-active':'']" @click="setCalView('month')">Month</button>
+                    </div>
+                </div>
 
-                        <!-- Rows per slot -->
-                        <template v-for="slot in venueSlots" :key="slot.id">
-                            <div class="cal-slot-label">
-                                <div class="slot-name">{{ slot.name }}</div>
-                                <div class="slot-time">{{ slot.start_time?.slice(0,5) }} – {{ slot.end_time?.slice(0,5) }}</div>
+                <!-- ── MONTH VIEW ── -->
+                <div class="tg-month-wrapper" v-if="selectedVenue && calView==='month'">
+                    <!-- Day-of-week header -->
+                    <div class="tg-month-head">
+                        <div v-for="d in ['Min','Sen','Sel','Rab','Kam','Jum','Sab']" :key="d" class="tg-month-headcell">{{ d }}</div>
+                    </div>
+                    <!-- Weeks grid -->
+                    <div class="tg-month-grid">
+                        <div
+                            v-for="cell in monthCells"
+                            :key="cell.dateStr"
+                            class="tg-month-cell"
+                            :class="{
+                                'tg-month-cell-other': !cell.inMonth,
+                                'tg-month-cell-today': cell.isToday,
+                                'tg-month-cell-weekend': cell.isWeekend
+                            }"
+                        >
+                            <div class="tg-month-daynum">{{ cell.dayNum }}</div>
+                            <div class="tg-month-events">
+                                <template v-for="slot in venueSlots" :key="slot.id">
+                                    <div
+                                        v-if="getCellStatus(slot.id, cell.dateStr)"
+                                        class="tg-month-chip"
+                                        :class="'tg-event-' + getCellStatus(slot.id, cell.dateStr)?.toLowerCase()"
+                                        @click="openCellDetail(slot.id, cell.dateStr)"
+                                    >
+                                        <span class="tg-month-chip-name">{{ slot.start_time?.slice(0,5) }} – {{ slot.end_time?.slice(0,5) }}</span>
+                                        <span class="tg-month-chip-customer">
+                                            {{ getCellCustomerName(slot.id, cell.dateStr) || slot.name }}
+                                        </span>
+                                    </div>
+                                </template>
                             </div>
-                            <div
-                                v-for="day in calendarDays"
-                                :key="day.dateStr"
-                                class="cal-cell"
-                                :class="getCellClass(slot.id, day.dateStr)"
-                                :title="getCellTooltip(slot.id, day.dateStr)"
-                                @click="openCellDetail(slot.id, day.dateStr)"
-                            >
-                                <span class="cell-status-icon">{{ getCellIcon(slot.id, day.dateStr) }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── DAY / WEEK TIME-GRID VIEW ── -->
+                <div class="tg-wrapper" v-else-if="selectedVenue">
+                    <!-- Day headers -->
+                    <div class="tg-header-row">
+                        <div class="tg-time-gutter"></div>
+                        <div
+                            v-for="day in viewDays"
+                            :key="day.dateStr"
+                            class="tg-day-header"
+                            :class="{ 'tg-today': day.isToday, 'tg-weekend': day.isWeekend }"
+                        >
+                            <span class="tg-dayname">{{ day.dayName }}</span>
+                            <span class="tg-daynum">{{ day.dayNum }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Scrollable time grid body -->
+                    <div class="tg-body-scroll" ref="tgBodyRef">
+                        <div class="tg-body">
+                            <!-- Hour rows -->
+                            <div v-for="hour in hours" :key="hour" class="tg-hour-row">
+                                <div class="tg-time-label">{{ String(hour).padStart(2,'0') }}:00</div>
+                                <div
+                                    v-for="day in viewDays"
+                                    :key="day.dateStr"
+                                    class="tg-hour-cell"
+                                    :class="{ 'tg-today-col': day.isToday }"
+                                ></div>
                             </div>
-                        </template>
+
+                            <!-- Events overlay per day column -->
+                            <div class="tg-events-layer">
+                                <div class="tg-events-gutter"></div>
+                                <div
+                                    v-for="day in viewDays"
+                                    :key="day.dateStr"
+                                    class="tg-events-col"
+                                >
+                                    <template v-for="slot in venueSlots" :key="slot.id">
+                                        <div
+                                            v-if="getSlotEventStyle(slot, day.dateStr)"
+                                            class="tg-event"
+                                            :class="getTgEventClass(slot.id, day.dateStr)"
+                                            :style="getSlotEventStyle(slot, day.dateStr)"
+                                            @click="openCellDetail(slot.id, day.dateStr)"
+                                        >
+                                            <div class="tg-event-title">{{ slot.name }}</div>
+                                            <div class="tg-event-time">{{ slot.start_time?.slice(0,5) }} – {{ slot.end_time?.slice(0,5) }}</div>
+                                            <div class="tg-event-customer" v-if="getCellCustomerName(slot.id, day.dateStr)">
+                                                👤 {{ getCellCustomerName(slot.id, day.dateStr) }}
+                                            </div>
+                                            <div class="tg-event-venue">{{ selectedVenue?.name }}</div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -334,6 +411,208 @@ const selectedVenueId = ref(null)
 const venueSlots     = ref([])
 const calendarBookings = ref([]) // bookinglines for selected venue+month
 
+// ── Time-grid calendar state ──────────────────────────────────
+const calView      = ref('week')   // 'day' | 'week' | 'month'
+const tgBodyRef    = ref(null)
+// weekStart: Monday of the current displayed week (or the single day for day view)
+function getMondayOf(date) {
+    const d = new Date(date)
+    const day = d.getDay()
+    const diff = (day === 0 ? -6 : 1 - day)
+    d.setDate(d.getDate() + diff)
+    d.setHours(0,0,0,0)
+    return d
+}
+const weekStart    = ref(getMondayOf(new Date()))
+const hours        = Array.from({ length: 24 }, (_, i) => i)
+
+function setCalView(view) {
+    calView.value = view
+    if (view === 'day') {
+        weekStart.value = new Date(now)
+        weekStart.value.setHours(0,0,0,0)
+    } else if (view === 'week') {
+        weekStart.value = getMondayOf(new Date())
+    }
+    syncCalendarMonthToWeek()
+}
+
+const viewDays = computed(() => {
+    const dayShort = ['Min','Sen','Sel','Rab','Kam','Jum','Sab']
+    const todayStr = toLocalDateStr(now)
+    if (calView.value === 'day') {
+        const d = new Date(weekStart.value)
+        const dateStr = toLocalDateStr(d)
+        return [{
+            dateStr,
+            dayNum: d.getDate(),
+            dayName: dayShort[d.getDay()],
+            isToday: dateStr === todayStr,
+            isWeekend: d.getDay() === 0 || d.getDay() === 6
+        }]
+    }
+    return Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(weekStart.value)
+        d.setDate(d.getDate() + i)
+        const dateStr = toLocalDateStr(d)
+        return {
+            dateStr,
+            dayNum: d.getDate(),
+            dayName: dayShort[d.getDay()],
+            isToday: dateStr === todayStr,
+            isWeekend: d.getDay() === 0 || d.getDay() === 6
+        }
+    })
+})
+
+// ── Month view cells ──────────────────────────────────────────
+const monthCells = computed(() => {
+    const year  = calendarYear.value
+    const month = calendarMonth.value
+    const todayStr = toLocalDateStr(now)
+    const dayShort = ['Min','Sen','Sel','Rab','Kam','Jum','Sab']
+    const firstDay = new Date(year, month, 1)
+    const lastDay  = new Date(year, month + 1, 0)
+    // pad start to Sunday
+    const startPad = firstDay.getDay() // 0=Sun
+    // pad end to Saturday
+    const endPad   = 6 - lastDay.getDay()
+    const cells = []
+    for (let i = -startPad; i <= lastDay.getDate() - 1 + endPad; i++) {
+        const d = new Date(year, month, 1 + i)
+        const dateStr = toLocalDateStr(d)
+        cells.push({
+            dateStr,
+            dayNum: d.getDate(),
+            dayName: dayShort[d.getDay()],
+            inMonth: d.getMonth() === month,
+            isToday: dateStr === todayStr,
+            isWeekend: d.getDay() === 0 || d.getDay() === 6
+        })
+    }
+    return cells
+})
+
+const weekRangeLabel = computed(() => {
+    if (calView.value === 'month') {
+        return `${monthNames[calendarMonth.value]} ${calendarYear.value}`
+    }
+    const days = viewDays.value
+    if (!days.length) return ''
+    const first = new Date(days[0].dateStr + 'T00:00:00')
+    const last  = new Date(days[days.length - 1].dateStr + 'T00:00:00')
+    if (calView.value === 'day') {
+        return `${monthNames[first.getMonth()].slice(0,3)} ${first.getDate()}, ${first.getFullYear()}`
+    }
+    if (first.getMonth() === last.getMonth()) {
+        return `${monthNames[first.getMonth()]} ${first.getDate()} – ${last.getDate()}, ${first.getFullYear()}`
+    }
+    return `${monthNames[first.getMonth()].slice(0,3)} ${first.getDate()} – ${monthNames[last.getMonth()].slice(0,3)} ${last.getDate()}, ${last.getFullYear()}`
+})
+
+const HOUR_HEIGHT = 60 // px per hour
+
+function timeToMinutes(timeStr) {
+    if (!timeStr) return 0
+    const [h, m] = timeStr.split(':').map(Number)
+    return h * 60 + (m || 0)
+}
+
+function getSlotEventStyle(slot, dateStr) {
+    const hasBooking = !!getCellStatus(slot.id, dateStr)
+    const startMin = timeToMinutes(slot.start_time)
+    const endMin   = timeToMinutes(slot.end_time)
+    const duration = endMin - startMin
+    if (duration <= 0) return null
+    if (!hasBooking) return null
+    return {
+        top:    `${(startMin / 60) * HOUR_HEIGHT}px`,
+        height: `${(duration / 60) * HOUR_HEIGHT - 2}px`,
+    }
+}
+
+function getTgEventClass(slotId, dateStr) {
+    const status = getCellStatus(slotId, dateStr)
+    if (status === 'CO') return 'tg-event-co'
+    if (status === 'WP') return 'tg-event-wp'
+    if (status === 'MT') return 'tg-event-mt'
+    return 'tg-event-empty'
+}
+
+// Get primary customer name for a cell (first CO entry, else first entry)
+function getCellCustomerName(slotId, dateStr) {
+    const entries = bookingMap.value[`${slotId}-${dateStr}`]
+    if (!entries || entries.length === 0) return null
+    const co = entries.find(e => e.status === 'CO')
+    const entry = co || entries[0]
+    return entry.customer_name || null
+}
+
+function prevPeriod() {
+    if (calView.value === 'month') {
+        let m = calendarMonth.value - 1
+        let y = calendarYear.value
+        if (m < 0) { m = 11; y-- }
+        calendarMonth.value = m
+        calendarYear.value  = y
+        loadCalendarBookingsForCurrentView()
+    } else {
+        const d = new Date(weekStart.value)
+        d.setDate(d.getDate() - (calView.value === 'day' ? 1 : 7))
+        weekStart.value = d
+        syncCalendarMonthToWeek()
+    }
+}
+function nextPeriod() {
+    if (calView.value === 'month') {
+        let m = calendarMonth.value + 1
+        let y = calendarYear.value
+        if (m > 11) { m = 0; y++ }
+        calendarMonth.value = m
+        calendarYear.value  = y
+        loadCalendarBookingsForCurrentView()
+    } else {
+        const d = new Date(weekStart.value)
+        d.setDate(d.getDate() + (calView.value === 'day' ? 1 : 7))
+        weekStart.value = d
+        syncCalendarMonthToWeek()
+    }
+}
+function goToToday() {
+    if (calView.value === 'month') {
+        calendarMonth.value = now.getMonth()
+        calendarYear.value  = now.getFullYear()
+        loadCalendarBookingsForCurrentView()
+    } else {
+        weekStart.value = calView.value === 'day' ? new Date(now) : getMondayOf(new Date())
+        syncCalendarMonthToWeek()
+    }
+}
+function syncCalendarMonthToWeek() {
+    const mid = calView.value === 'week'
+        ? new Date(weekStart.value.getTime() + 3 * 86400000)
+        : new Date(weekStart.value)
+    calendarMonth.value = mid.getMonth()
+    calendarYear.value  = mid.getFullYear()
+}
+
+// When month/year selector changes, jump to week that starts in that month
+function onCalendarDateChange() {
+    const d = new Date(calendarYear.value, calendarMonth.value, 1)
+    weekStart.value = calView.value === 'day' ? d : getMondayOf(d)
+    loadCalendarBookingsForCurrentView()
+}
+
+async function loadCalendarBookingsForCurrentView() {
+    if (!selectedVenueId.value) return
+    isLoading.value = true
+    try {
+        await loadCalendarBookings(selectedVenueId.value)
+    } finally {
+        isLoading.value = false
+    }
+}
+
 // ── Cell Detail Modal State ───────────────────────────────────
 const cellDetail = ref({
     show: false,
@@ -381,7 +660,6 @@ const statusLegend = computed(() => [
     { label: 'Confirmed (CO)',        color: '#10b981', value: summary.value.statusCount.CO || 0 },
     { label: 'Waiting Payment (WP)', color: '#f59e0b', value: summary.value.statusCount.WP || 0 },
     { label: 'Maintenance (MT)',      color: '#6366f1', value: summary.value.statusCount.MT || 0 },
-    { label: 'Cancelled (CL)',        color: '#f43f5e', value: summary.value.statusCount.CL || 0 },
 ])
 
 // ── Selected Venue Object ─────────────────────────────────────
@@ -425,18 +703,18 @@ function getMonthRange(year, month) {
 }
 
 // ── Cell helpers ──────────────────────────────────────────────
-// bookingMap: { slotId-dateStr: [{status}] } - filter by selected month
+// bookingMap: keyed by slotId-dateStr, deduplicated by bo_booking_id
 const bookingMap = computed(() => {
     const map = {}
-    const { start, end } = getMonthRange(calendarYear.value, calendarMonth.value)
     for (const line of calendarBookings.value) {
         const dateStr = (line.tanggal || line.bookingdate || '').slice(0,10)
-        if (!dateStr || dateStr < start || dateStr > end) continue
-        // Skip status CL (cancelled) agar tidak muncul di kalender
+        if (!dateStr) continue
         if (line.status === 'CL') continue
         const key = `${line.bo_slot_id}-${dateStr}`
         if (!map[key]) map[key] = []
-        map[key].push(line)
+        // Deduplicate: skip if this booking_id already in this cell
+        const alreadyExists = map[key].some(e => e.bo_booking_id === line.bo_booking_id)
+        if (!alreadyExists) map[key].push(line)
     }
     return map
 })
@@ -444,8 +722,8 @@ const bookingMap = computed(() => {
 function getCellStatus(slotId, dateStr) {
     const entries = bookingMap.value[`${slotId}-${dateStr}`]
     if (!entries || entries.length === 0) return null
-    // Prioritas: CO > WP > MT > CL
-    const priority = ['CO','MT','WP','CL']
+    // Prioritas: CO > MT > WP
+    const priority = ['CO','MT','WP']
     for (const p of priority) {
         if (entries.some(e => e.status === p)) return p
     }
@@ -458,7 +736,6 @@ function getCellClass(slotId, dateStr) {
     if (status === 'CO') return 'cell-co'
     if (status === 'WP') return 'cell-wp'
     if (status === 'MT') return 'cell-mt'
-    if (status === 'CL') return 'cell-cl'
     return 'cell-empty'
 }
 
@@ -468,7 +745,6 @@ function getCellIcon(slotId, dateStr) {
     if (status === 'CO') return '✓'
     if (status === 'WP') return '⏳'
     if (status === 'MT') return '🔧'
-    if (status === 'CL') return '✕'
     return ''
 }
 
@@ -762,7 +1038,7 @@ function renderStatusChart() {
     if (statusChartInstance) statusChartInstance.destroy()
 
     const counts = summary.value.statusCount
-    const labels = ['CO', 'WP', 'MT', 'CL']
+    const labels = ['CO', 'WP', 'MT']
     const data   = labels.map(l => counts[l] || 0)
     const total  = data.reduce((a,b)=>a+b,0)
     if (total === 0) return
@@ -773,7 +1049,7 @@ function renderStatusChart() {
             labels,
             datasets: [{
                 data,
-                backgroundColor: ['#10b981','#f59e0b','#6366f1','#f43f5e'],
+                backgroundColor: ['#10b981','#f59e0b','#6366f1'],
                 borderWidth: 2,
                 borderColor: '#fff',
                 hoverOffset: 8
@@ -827,6 +1103,11 @@ onMounted(async () => {
         await loadSlotsForVenue(selectedVenueId.value)
         await loadCalendarBookings(selectedVenueId.value)
     }
+    // Scroll to 8am
+    await nextTick()
+    if (tgBodyRef.value) {
+        tgBodyRef.value.scrollTop = 8 * HOUR_HEIGHT
+    }
 })
 </script>
 
@@ -839,6 +1120,8 @@ onMounted(async () => {
     background: #f4f5f7;
     min-height: 100vh;
     color: #1a1d23;
+    overflow-x: hidden;
+    max-width: 100%;
 }
 
 /* ── Header ── */
@@ -1082,9 +1365,10 @@ onMounted(async () => {
 /* ── Charts Row ── */
 .charts-row {
     display: grid;
-    grid-template-columns: 1fr 360px;
+    grid-template-columns: minmax(0, 1fr) 320px;
     gap: 1rem;
     margin-bottom: 1.5rem;
+    min-width: 0;
 }
 @media (max-width: 900px) {
     .charts-row { grid-template-columns: 1fr; }
@@ -1095,10 +1379,12 @@ onMounted(async () => {
     padding: 1.35rem;
     border: 1.5px solid #e9eaf0;
     box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    min-width: 0;
+    overflow: hidden;
 }
 .chart-card-header { margin-bottom: 1rem; }
 .chart-title { font-size: 0.95rem; font-weight: 700; margin: 0; }
-.chart-wrapper { position: relative; height: 220px; }
+.chart-wrapper { position: relative; height: 220px; width: 100%; }
 .chart-wrapper-donut { height: 170px; }
 
 .donut-legend { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; }
@@ -1252,5 +1538,295 @@ onMounted(async () => {
     border-radius: 50%;
     animation: spin 0.6s linear infinite;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* ── Time-grid calendar ── */
+.tg-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.tg-toolbar-left, .tg-toolbar-right { display: flex; align-items: center; gap: 0.4rem; }
+.tg-range-label { font-size: 0.95rem; font-weight: 700; color: #1a1d23; margin-left: 0.4rem; }
+.tg-btn {
+    padding: 0.3rem 0.85rem;
+    border-radius: 7px;
+    border: 1.5px solid #e5e7eb;
+    background: #f9fafb;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4b5563;
+    cursor: pointer;
+    transition: all 0.13s;
+}
+.tg-btn:hover { border-color: #6366f1; color: #6366f1; }
+.tg-btn.tg-btn-active { background: #6366f1; border-color: #6366f1; color: #fff; }
+.tg-nav { padding: 0.3rem 0.7rem; font-size: 1.1rem; }
+
+.tg-wrapper {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+
+/* sticky header */
+.tg-header-row {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: #f8fafc;
+    border-bottom: 2px solid #e5e7eb;
+}
+.tg-time-gutter {
+    width: 56px;
+    flex-shrink: 0;
+    border-right: 1px solid #e5e7eb;
+}
+.tg-day-header {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.4rem 0.2rem;
+    border-right: 1px solid #f0f0f0;
+    min-width: 0;
+}
+.tg-dayname { font-size: 0.62rem; font-weight: 700; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.04em; }
+.tg-daynum  { font-size: 0.9rem; font-weight: 700; color: #374151; }
+.tg-today .tg-daynum { color: #6366f1; background: #eef2ff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; }
+.tg-weekend .tg-dayname { color: #f43f5e; }
+
+/* scrollable body */
+.tg-body-scroll {
+    max-height: 600px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+.tg-body {
+    position: relative;
+}
+.tg-hour-row {
+    display: flex;
+    height: 60px;
+    border-bottom: 1px solid #f0f0f0;
+}
+.tg-time-label {
+    width: 56px;
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #9ca3af;
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    padding: 0 8px 0 0;
+    margin-top: -0.5em;
+    border-right: 1px solid #e5e7eb;
+}
+.tg-hour-cell {
+    flex: 1;
+    border-right: 1px solid #f0f0f0;
+}
+.tg-today-col { background: rgba(99,102,241,0.03); }
+
+/* events overlay */
+.tg-events-layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    pointer-events: none;
+}
+.tg-events-gutter {
+    width: 56px;
+    flex-shrink: 0;
+}
+.tg-events-col {
+    flex: 1;
+    position: relative;
+    pointer-events: auto;
+    min-width: 0;
+}
+.tg-event {
+    position: absolute;
+    left: 2px;
+    right: 2px;
+    border-radius: 5px;
+    padding: 3px 6px;
+    overflow: hidden;
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    z-index: 2;
+    border-left: 3px solid transparent;
+    transition: filter 0.12s;
+}
+.tg-event:hover { filter: brightness(0.92); }
+.tg-event-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-event-time  { font-size: 0.62rem; opacity: 0.85; }
+.tg-event-venue { font-size: 0.6rem; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* event colors – same palette as before */
+.tg-event-co  { background: #4a8f3f; color: #fff; border-left-color: #2d6a25; }
+.tg-event-wp  { background: #f59e0b; color: #fff; border-left-color: #d97706; }
+.tg-event-mt  { background: #6366f1; color: #fff; border-left-color: #4338ca; }
+.tg-event-empty { background: #f3f4f6; color: #6b7280; border-left-color: #d1d5db; }
+
+/* ── Month view ── */
+.tg-month-wrapper {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #fff;
+}
+.tg-month-head {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    background: #f8fafc;
+    border-bottom: 2px solid #e5e7eb;
+    width: 100%;
+}
+.tg-month-headcell {
+    text-align: center;
+    padding: 0.4rem 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.tg-month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    width: 100%;
+}
+.tg-month-cell {
+    min-height: 100px;
+    border-right: 1px solid #f0f0f0;
+    border-bottom: 1px solid #f0f0f0;
+    padding: 4px;
+    position: relative;
+    background: #fff;
+}
+.tg-month-cell:nth-child(7n) { border-right: none; }
+.tg-month-cell-other { background: #fafafa; }
+.tg-month-cell-other .tg-month-daynum { color: #d1d5db; }
+.tg-month-cell-today { background: #eef2ff; }
+.tg-month-cell-today .tg-month-daynum {
+    color: #fff;
+    background: #6366f1;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.tg-month-cell-weekend .tg-month-daynum { color: #f43f5e; }
+.tg-month-cell-today.tg-month-cell-weekend .tg-month-daynum { color: #fff; }
+.tg-month-daynum {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #374151;
+    margin-bottom: 3px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.tg-month-events {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.tg-month-chip {
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    cursor: pointer;
+    overflow: hidden;
+    line-height: 1.3;
+    transition: filter 0.12s;
+}
+.tg-month-chip:hover { filter: brightness(0.9); }
+.tg-month-chip-name { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-month-chip-customer {
+    display: block;
+    font-weight: 500;
+    opacity: 0.85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.58rem;
+}
+.tg-event-customer {
+    font-size: 0.62rem;
+    opacity: 0.9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+}
+
+/* ── Responsive mobile ── */
+@media (max-width: 640px) {
+    .dashboard-root { padding: 0.75rem; }
+    .dash-title { font-size: 1.2rem; }
+    .summary-grid { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+    .card-value { font-size: 1.1rem; }
+
+    /* Charts: stack vertically, reduce height so they don't overflow */
+    .charts-row { grid-template-columns: 1fr; gap: 0.75rem; }
+    .chart-wrapper { height: 160px; }
+    .chart-wrapper-donut { height: 130px; }
+
+    /* Calendar header */
+    .calendar-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+    .calendar-header-top { flex-direction: column; align-items: flex-start; gap: 0.5rem; width: 100%; }
+    .calendar-selectors { flex-wrap: wrap; }
+    .calendar-legend { gap: 0.4rem; flex-wrap: wrap; }
+
+    /* Venue tabs */
+    .venue-tab-buttons { gap: 0.3rem; flex-wrap: wrap; }
+    .venue-tab-btn { font-size: 0.72rem; padding: 0.3rem 0.65rem; }
+
+    /* Toolbar */
+    .tg-toolbar { flex-direction: column; align-items: flex-start; gap: 0.4rem; }
+    .tg-toolbar-left { gap: 0.3rem; }
+    .tg-toolbar-right { align-self: flex-end; }
+    .tg-range-label { font-size: 0.8rem; }
+
+    /* Day/Week time grid */
+    .tg-time-gutter, .tg-events-gutter { width: 36px; }
+    .tg-time-label { width: 36px; font-size: 0.58rem; padding-right: 4px; }
+    .tg-hour-row { height: 50px; }
+    .tg-day-header { padding: 0.3rem 0.1rem; }
+    .tg-dayname { font-size: 0.55rem; }
+    .tg-daynum  { font-size: 0.78rem; }
+    .tg-event { padding: 2px 4px; }
+    .tg-event-title { font-size: 0.6rem; }
+    .tg-event-time, .tg-event-customer, .tg-event-venue { font-size: 0.55rem; }
+
+    /* Month view: horizontal scroll with fixed equal cell widths */
+    .tg-month-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tg-month-head { grid-template-columns: repeat(7, 68px); width: auto; }
+    .tg-month-grid { grid-template-columns: repeat(7, 68px); width: auto; }
+    .tg-month-cell { min-height: 80px; padding: 2px; width: 68px; }
+    .tg-month-chip { font-size: 0.6rem; padding: 2px 4px; }
+    .tg-month-chip-name { font-size: 0.6rem; }
+    .tg-month-chip-customer { font-size: 0.55rem; }
+    .tg-month-headcell { font-size: 0.6rem; padding: 0.35rem 0; }
+    .tg-month-daynum { font-size: 0.68rem; }
+
+    /* Modal */
+    .modal-card { width: 95vw; padding: 1rem; }
+}
+@media (max-width: 400px) {
+    .summary-grid { grid-template-columns: 1fr; }
+    .chart-wrapper { height: 140px; }
+}
 </style>

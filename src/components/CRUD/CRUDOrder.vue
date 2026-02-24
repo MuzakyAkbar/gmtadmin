@@ -2078,11 +2078,11 @@ const linesByDate = computed(() => {
                 modal 
                 appendTo="body"
                 header="Pilih Slot Booking" 
-                :style="{ width: 'min(98vw, 860px)', height: 'min(92vh, 640px)' }"
+                :style="{ width: 'min(98vw, 600px)', maxHeight: '92vh' }"
                 :pt="{ 
                     root: { style: 'z-index: 10001 !important' },
                     mask: { style: 'z-index: 10000 !important' },
-                    content: { class: 'p-0 flex flex-col flex-1 overflow-hidden', style: 'height: calc(100% - 57px)' }
+                    content: { class: 'p-0 flex flex-col overflow-hidden', style: 'height: calc(92vh - 120px)' }
                 }"
             >
                 <div class="flex flex-col h-full overflow-hidden">
@@ -2112,170 +2112,169 @@ const linesByDate = computed(() => {
                         <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-gray-500 inline-block"></span>Maintenance</span>
                     </div>
 
-                    <!-- Body: date list + slot grid -->
-                    <div class="flex flex-1 min-h-0 overflow-hidden">
-                        <!-- Left: date list -->
-                        <div class="w-28 flex-shrink-0 overflow-y-auto border-r bg-white">
-                            <div class="flex flex-col gap-0.5 p-1.5">
-                                <div v-if="calDates.length === 0" class="text-xs text-gray-400 p-2 text-center">Tidak ada tanggal</div>
-                                <button
-                                    v-for="d in calDates"
-                                    :key="d.dateStr"
-                                    @click="selectCalDate(d)"
-                                    class="flex items-center justify-between px-2 py-1.5 rounded-lg transition-all text-left w-full"
-                                    :class="calSelectedDate?.dateStr === d.dateStr
-                                        ? 'bg-[#0A0E4F] text-white shadow'
-                                        : d.dateStr < toLocalDateStr(new Date())
-                                            ? 'text-gray-400 hover:bg-gray-100'
-                                            : 'hover:bg-gray-100 text-gray-700'"
-                                >
-                                    <div>
-                                        <div class="text-[10px] opacity-60 uppercase leading-none">{{ d.dayname }}</div>
-                                        <div class="text-xs font-bold leading-tight mt-0.5" :class="d.dateStr < toLocalDateStr(new Date()) && calSelectedDate?.dateStr !== d.dateStr ? 'line-through opacity-60' : ''">{{ d.tgl }}</div>
-                                    </div>
-                                    <!-- Dot: ada slot dipilih -->
-                                    <span 
-                                        v-if="calSelectedSlots[d.dateStr]?.length"
-                                        class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                                        :class="calSelectedDate?.dateStr === d.dateStr ? 'bg-yellow-400' : 'bg-purple-500'"
-                                    ></span>
-                                    <i v-else-if="calLoadingDate === d.dateStr" class="pi pi-spin pi-spinner text-[9px] opacity-50"></i>
-                                </button>
+                    <!-- Date list: horizontal scroll -->
+                    <div class="border-b bg-white flex-shrink-0 overflow-x-auto" style="-webkit-overflow-scrolling: touch;">
+                        <div class="flex gap-1 p-2" style="min-width: max-content;">
+                            <div v-if="calDates.length === 0" class="text-xs text-gray-400 px-3 py-2">Tidak ada tanggal</div>
+                            <button
+                                v-for="d in calDates"
+                                :key="d.dateStr"
+                                @click="selectCalDate(d)"
+                                class="flex flex-col items-center px-2.5 py-1.5 rounded-xl transition-all text-center flex-shrink-0 relative"
+                                style="min-width: 48px"
+                                :class="calSelectedDate?.dateStr === d.dateStr
+                                    ? 'bg-[#0A0E4F] text-white shadow'
+                                    : d.dateStr < toLocalDateStr(new Date())
+                                        ? 'text-gray-400 hover:bg-gray-100'
+                                        : 'hover:bg-gray-100 text-gray-700'"
+                            >
+                                <div class="text-[9px] opacity-60 uppercase leading-none">{{ d.dayname }}</div>
+                                <div class="text-xs font-bold leading-tight mt-0.5" :class="d.dateStr < toLocalDateStr(new Date()) && calSelectedDate?.dateStr !== d.dateStr ? 'line-through opacity-50' : ''">
+                                    {{ d.date.getDate() }}
+                                </div>
+                                <!-- Dot indicator -->
+                                <span 
+                                    v-if="calSelectedSlots[d.dateStr]?.length"
+                                    class="absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
+                                    :class="calSelectedDate?.dateStr === d.dateStr ? 'bg-yellow-400' : 'bg-purple-500'"
+                                ></span>
+                                <i v-else-if="calLoadingDate === d.dateStr" class="pi pi-spin pi-spinner text-[9px] opacity-50 mt-0.5"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Slot grid area: scrollable -->
+                    <div class="flex-1 overflow-y-auto p-3">
+                        <!-- Empty state -->
+                        <div v-if="!calSelectedDate" class="flex items-center justify-center h-full text-gray-400">
+                            <div class="text-center">
+                                <i class="pi pi-calendar text-4xl mb-2 block opacity-40"></i>
+                                <span class="text-sm">Pilih tanggal di atas</span>
                             </div>
                         </div>
 
-                        <!-- Right: slot grid -->
-                        <div class="flex-1 overflow-y-auto p-3">
-                            <!-- Empty state -->
-                            <div v-if="!calSelectedDate" class="flex items-center justify-center h-full text-gray-400">
-                                <div class="text-center">
-                                    <i class="pi pi-calendar text-4xl mb-2 block opacity-40"></i>
-                                    <span class="text-sm">Pilih tanggal di sebelah kiri</span>
-                                </div>
+                        <!-- Loading -->
+                        <div v-else-if="calLoadingDate === calSelectedDate.dateStr" class="flex items-center justify-center h-40 text-gray-400">
+                            <div class="text-center">
+                                <i class="pi pi-spin pi-spinner text-3xl mb-2 block"></i>
+                                <span class="text-sm">Memuat slot...</span>
+                            </div>
+                        </div>
+
+                        <div v-else>
+                            <!-- Date title -->
+                            <div class="flex items-center gap-2 mb-2.5">
+                                <i class="pi pi-calendar-plus text-purple-600 text-sm"></i>
+                                <span class="font-bold text-[#0A0E4F] text-sm">
+                                    {{ calSelectedDate.date.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) }}
+                                </span>
+                                <span v-if="calSelectedSlots[calSelectedDate.dateStr]?.length" class="ml-auto text-xs font-bold px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">
+                                    {{ calSelectedSlots[calSelectedDate.dateStr].length }} dipilih
+                                </span>
                             </div>
 
-                            <!-- Loading -->
-                            <div v-else-if="calLoadingDate === calSelectedDate.dateStr" class="flex items-center justify-center h-full text-gray-400">
-                                <div class="text-center">
-                                    <i class="pi pi-spin pi-spinner text-3xl mb-2 block"></i>
-                                    <span class="text-sm">Memuat slot...</span>
-                                </div>
+                            <!-- No slots -->
+                            <div v-if="getCalSlots(calSelectedDate.dateStr).length === 0" class="p-6 text-center text-gray-400 bg-gray-50 rounded-xl">
+                                <i class="pi pi-clock text-3xl mb-2 block"></i>
+                                <span class="text-sm">Tidak ada slot tersedia</span>
                             </div>
 
-                            <div v-else>
-                                <!-- Date title -->
-                                <div class="flex items-center gap-2 mb-2.5">
-                                    <i class="pi pi-calendar-plus text-purple-600 text-sm"></i>
-                                    <span class="font-bold text-[#0A0E4F] text-sm">
-                                        {{ calSelectedDate.date.toLocaleDateString('id-ID', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) }}
-                                    </span>
-                                    <span v-if="calSelectedSlots[calSelectedDate.dateStr]?.length" class="ml-auto text-xs font-bold px-2 py-0.5 bg-purple-100 text-purple-700 rounded-full">
-                                        {{ calSelectedSlots[calSelectedDate.dateStr].length }} dipilih
-                                    </span>
-                                </div>
-
-                                <!-- No slots -->
-                                <div v-if="getCalSlots(calSelectedDate.dateStr).length === 0" class="p-6 text-center text-gray-400 bg-gray-50 rounded-xl">
-                                    <i class="pi pi-clock text-3xl mb-2 block"></i>
-                                    <span class="text-sm">Tidak ada slot tersedia</span>
-                                </div>
-
-                                <template v-else>
-                                    <!-- All Day button -->
-                                    <div class="mb-2">
-                                        <button
-                                            @click="toggleAllDayCal(calSelectedDate.dateStr, calSelectedDate)"
-                                            class="w-full flex items-center justify-between px-3 py-2 rounded-lg border-2 transition-all text-sm font-semibold"
-                                            :class="isAllDayCalSelected(calSelectedDate.dateStr)
-                                                ? 'bg-[#0A0E4F] text-white border-[#0A0E4F]'
-                                                : 'bg-gray-50 text-gray-700 border-gray-200 hover:border-purple-400 hover:bg-purple-50'"
-                                        >
-                                            <span class="flex items-center gap-2">
-                                                <i class="pi pi-check-square"></i>
-                                                All Day — pilih semua slot reguler
-                                            </span>
-                                            <span class="text-xs opacity-70">
-                                                {{ getCalSlots(calSelectedDate.dateStr).filter(s => !s.isPerPerson && !['WP','CO','MT','ADDED'].includes(getCalSlotStatus(calSelectedDate.dateStr, s))).length }} slot
-                                            </span>
-                                        </button>
-                                    </div>
-
-                                    <!-- Slot grid -->
-                                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                                    <div
-                                        v-for="slot in getCalSlots(calSelectedDate.dateStr)"
-                                        :key="slot.id"
-                                        @click="toggleCalSlot(calSelectedDate.dateStr, slot, calSelectedDate)"
-                                        class="relative px-2 py-2 text-center rounded-xl cursor-pointer transition-all duration-200 select-none"
-                                        :class="getCalSlotClass(calSelectedDate.dateStr, slot)"
+                            <template v-else>
+                                <!-- All Day button -->
+                                <div class="mb-2">
+                                    <button
+                                        @click="toggleAllDayCal(calSelectedDate.dateStr, calSelectedDate)"
+                                        class="w-full flex items-center justify-between px-3 py-2 rounded-lg border-2 transition-all text-sm font-semibold"
+                                        :class="isAllDayCalSelected(calSelectedDate.dateStr)
+                                            ? 'bg-[#0A0E4F] text-white border-[#0A0E4F]'
+                                            : 'bg-gray-50 text-gray-700 border-gray-200 hover:border-purple-400 hover:bg-purple-50'"
                                     >
-                                        <!-- MT loading spinner -->
-                                        <div v-if="calMtLoading === `${calSelectedDate.dateStr}-${slot.id}`" class="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl">
-                                            <i class="pi pi-spin pi-spinner text-white"></i>
-                                        </div>
-
-                                        <!-- Checkmark -->
-                                        <div v-if="isCalSlotSelected(calSelectedDate.dateStr, slot)" class="absolute top-1 right-1">
-                                            <i class="pi pi-check-circle text-white text-xs"></i>
-                                        </div>
-
-                                        <!-- Time -->
-                                        <div class="text-xs font-bold leading-tight">
-                                            {{ formatTime(slot.start_time) }} s/d {{ formatTime(slot.end_time) }}
-                                        </div>
-
-                                        <!-- Sub-label -->
-                                        <div class="text-[10px] mt-0.5 leading-tight">
-                                            <template v-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'MT'">
-                                                <span class="opacity-90">🔧 Maintenance</span>
-                                            </template>
-                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'CO'">
-                                                <span class="opacity-80">✗ Booked</span>
-                                            </template>
-                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'WP'">
-                                                <span class="opacity-80">⏳ Pending</span>
-                                            </template>
-                                            <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'ADDED'">
-                                                <span class="opacity-80">✓ Ditambah</span>
-                                            </template>
-                                            <template v-else>
-                                                <span class="font-semibold opacity-90">
-                                                    {{ slot.isPerPerson ? `Rp ${formatCurrency(slot.pricePerPerson)}/org` : `Rp ${formatCurrency(slot.price)}` }}
-                                                </span>
-                                            </template>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Per-person inputs -->
-                                <div 
-                                    v-if="calSelectedSlots[calSelectedDate.dateStr]?.some(s => s.isPerPerson)"
-                                    class="mt-3 space-y-1.5"
-                                >
-                                    <div class="text-sm font-bold text-gray-700">Jumlah Orang</div>
-                                    <div 
-                                        v-for="s in calSelectedSlots[calSelectedDate.dateStr].filter(s => s.isPerPerson)"
-                                        :key="s.slotId"
-                                        class="flex items-center gap-3 p-2 bg-blue-50 rounded-lg"
-                                    >
-                                        <span class="text-sm flex-1">
-                                            {{ formatTime(s.slot_data.start_time) }} - {{ formatTime(s.slot_data.end_time) }}
-                                            <span class="text-xs text-gray-500 ml-1">(Rp {{ formatCurrency(s.slot_data.pricePerPerson) }}/org)</span>
+                                        <span class="flex items-center gap-2">
+                                            <i class="pi pi-check-square"></i>
+                                            All Day — pilih semua slot reguler
                                         </span>
-                                        <div class="flex items-center gap-1.5">
-                                            <button 
-                                                @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.max(1, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)-1)"
-                                                class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
-                                            >-</button>
-                                            <span class="w-7 text-center font-bold text-sm">{{ perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang || 1 }}</span>
-                                            <button 
-                                                @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.min(s.slot_data.capacity||99, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)+1)"
-                                                class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
-                                            >+</button>
-                                        </div>
+                                        <span class="text-xs opacity-70">
+                                            {{ getCalSlots(calSelectedDate.dateStr).filter(s => !s.isPerPerson && !['WP','CO','MT','ADDED'].includes(getCalSlotStatus(calSelectedDate.dateStr, s))).length }} slot
+                                        </span>
+                                    </button>
+                                </div>
+
+                                <!-- Slot grid -->
+                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                <div
+                                    v-for="slot in getCalSlots(calSelectedDate.dateStr)"
+                                    :key="slot.id"
+                                    @click="toggleCalSlot(calSelectedDate.dateStr, slot, calSelectedDate)"
+                                    class="relative px-2 py-2 text-center rounded-xl cursor-pointer transition-all duration-200 select-none"
+                                    :class="getCalSlotClass(calSelectedDate.dateStr, slot)"
+                                >
+                                    <!-- MT loading spinner -->
+                                    <div v-if="calMtLoading === `${calSelectedDate.dateStr}-${slot.id}`" class="absolute inset-0 flex items-center justify-center bg-black/20 rounded-xl">
+                                        <i class="pi pi-spin pi-spinner text-white"></i>
+                                    </div>
+
+                                    <!-- Checkmark -->
+                                    <div v-if="isCalSlotSelected(calSelectedDate.dateStr, slot)" class="absolute top-1 right-1">
+                                        <i class="pi pi-check-circle text-white text-xs"></i>
+                                    </div>
+
+                                    <!-- Time -->
+                                    <div class="text-xs font-bold leading-tight">
+                                        {{ formatTime(slot.start_time) }} s/d {{ formatTime(slot.end_time) }}
+                                    </div>
+
+                                    <!-- Sub-label -->
+                                    <div class="text-[10px] mt-0.5 leading-tight">
+                                        <template v-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'MT'">
+                                            <span class="opacity-90">🔧 Maintenance</span>
+                                        </template>
+                                        <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'CO'">
+                                            <span class="opacity-80">✗ Booked</span>
+                                        </template>
+                                        <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'WP'">
+                                            <span class="opacity-80">⏳ Pending</span>
+                                        </template>
+                                        <template v-else-if="getCalSlotStatus(calSelectedDate.dateStr, slot) === 'ADDED'">
+                                            <span class="opacity-80">✓ Ditambah</span>
+                                        </template>
+                                        <template v-else>
+                                            <span class="font-semibold opacity-90">
+                                                {{ slot.isPerPerson ? `Rp ${formatCurrency(slot.pricePerPerson)}/org` : `Rp ${formatCurrency(slot.price)}` }}
+                                            </span>
+                                        </template>
                                     </div>
                                 </div>
-                                </template><!-- end v-else (slots exist) -->
+                            </div>
+
+                            <!-- Per-person inputs -->
+                            <div 
+                                v-if="calSelectedSlots[calSelectedDate.dateStr]?.some(s => s.isPerPerson)"
+                                class="mt-3 space-y-1.5"
+                            >
+                                <div class="text-sm font-bold text-gray-700">Jumlah Orang</div>
+                                <div 
+                                    v-for="s in calSelectedSlots[calSelectedDate.dateStr].filter(s => s.isPerPerson)"
+                                    :key="s.slotId"
+                                    class="flex items-center gap-3 p-2 bg-blue-50 rounded-lg"
+                                >
+                                    <span class="text-sm flex-1">
+                                        {{ formatTime(s.slot_data.start_time) }} - {{ formatTime(s.slot_data.end_time) }}
+                                        <span class="text-xs text-gray-500 ml-1">(Rp {{ formatCurrency(s.slot_data.pricePerPerson) }}/org)</span>
+                                    </span>
+                                    <div class="flex items-center gap-1.5">
+                                        <button 
+                                            @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.max(1, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)-1)"
+                                            class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
+                                        >-</button>
+                                        <span class="w-7 text-center font-bold text-sm">{{ perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang || 1 }}</span>
+                                        <button 
+                                            @click.stop="perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`].jumlah_orang = Math.min(s.slot_data.capacity||99, (perPersonForm[`${calSelectedDate.dateStr}-${s.slotId}`]?.jumlah_orang||1)+1)"
+                                            class="w-6 h-6 bg-gray-200 rounded font-bold text-sm hover:bg-gray-300 transition-all"
+                                        >+</button>
+                                    </div>
+                                </div>
+                            </div>
+                            </template><!-- end v-else (slots exist) -->
                         </div>
                     </div>
 
@@ -2299,7 +2298,6 @@ const linesByDate = computed(() => {
                             />
                         </div>
                     </div>
-                </div>
                 </div>
             </Dialog>
         </div>
